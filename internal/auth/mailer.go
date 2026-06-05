@@ -177,7 +177,7 @@ func (m *CloudflareMailer) Send(e Email) error {
 }
 
 // cloudflareAddress renders a From value for the Cloudflare Email API. Cloudflare
-// wants a bare email string or a {address, name} object — it rejects the RFC 5322
+// wants a bare email string or a {address, name} object - it rejects the RFC 5322
 // "Name <addr>" display-name string that other providers accept. So split that
 // form into the object; pass a bare address through as a string.
 func cloudflareAddress(from string) any {
