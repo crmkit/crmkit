@@ -9,7 +9,7 @@ import (
 )
 
 // manualTemplate is the agent operating manual, embedded from agent.md (the
-// single source of truth — edit that markdown file, not a Go string). The body
+// single source of truth - edit that markdown file, not a Go string). The body
 // uses the literal placeholder "<base_url>", substituted per request in Manual.
 //
 //go:embed agent.md

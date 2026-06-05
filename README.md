@@ -122,11 +122,11 @@ echoes back as `?confirm=<token>`.
 
 crmkit also speaks the **Model Context Protocol** at `POST /mcp`, so it plugs
 into chat clients (ChatGPT, Claude) as a one-click connector. Point the client at
-`<base_url>/mcp` and it walks the standard OAuth 2.1 flow on its own — dynamic
+`<base_url>/mcp` and it walks the standard OAuth 2.1 flow on its own - dynamic
 client registration, then a crmkit sign-in page where the user enters their email
 and pastes the emailed code, then a token. Over MCP, crmkit exposes a single
 generic `request` tool (method + path + optional body) that calls this same HTTP
-API — its description is a compact manual and `GET /help` returns the full one —
+API - its description is a compact manual and `GET /help` returns the full one -
 so the whole API is reachable without re-encoding each endpoint as a tool. Tool
 results are the same plain text as the HTTP API.
 
@@ -138,9 +138,30 @@ POST /oauth/register                       (RFC 7591 dynamic client registration
 GET/POST /oauth/authorize · POST /oauth/token · POST /oauth/revoke
 ```
 
-The OAuth access token is an ordinary crmkit token — it shows up in `GET /tokens`
+The OAuth access token is an ordinary crmkit token - it shows up in `GET /tokens`
 and is revocable there. `mcp.allowed_redirect_uris` (default `["*"]`, kept safe by
 mandatory PKCE) restricts which client callbacks may register.
+
+## Skills
+
+Pre-built **agent skills** — connect, digest, import, backup, inbox-sync — live in
+[crmkit/skills](https://github.com/crmkit/skills). Install the set with one command
+(works across Claude Code, Cursor, and 40+ agents via
+[`npx skills`](https://github.com/vercel-labs/skills)):
+
+```bash
+npx skills add crmkit/skills
+```
+
+Or grab the release zip (offline / pinned) and unzip into your skills directory:
+
+```bash
+curl -fsSL https://github.com/crmkit/skills/releases/latest/download/crmkit-skills.zip -o /tmp/crmkit-skills.zip \
+  && unzip -o /tmp/crmkit-skills.zip -d ~/.claude/skills/
+```
+
+Either way, run `crmkit-connect` first — it authenticates and loads this server's
+manual; the recipe skills build on it.
 
 ## Development
 
