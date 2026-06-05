@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - next
     tags-ignore:
       - 'v*'
     paths-ignore:
@@ -15,6 +16,7 @@ on:
   pull_request:
     branches:
       - main
+      - next
     paths-ignore:
       - 'docs/**'
       - '*.md'

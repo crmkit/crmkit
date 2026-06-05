@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/crmkit/crmkit/internal/auth"
@@ -32,6 +33,12 @@ type Server struct {
 	ipLimiter   ratelimit.Limiter // general per-client-IP request limit
 	authLimiter ratelimit.Limiter // stricter per-email limit on login attempts
 	startedAt   time.Time
+
+	// internalOnce/internalMux back the MCP tool dispatcher: an unmiddlewared
+	// route table the /mcp handler replays synthesized HTTP requests against, so
+	// MCP tools reuse the exact CRM handlers (auth, validation, plain-text output).
+	internalOnce sync.Once
+	internalMux  http.Handler
 }
 
 // New constructs a Server from a loaded config, an open store backend, and a
@@ -123,6 +130,37 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /reminders", s.authed(s.handleListReminders))
 	mux.HandleFunc("GET /activities", s.authed(s.handleListActivities))
 	mux.HandleFunc("GET /audit", s.authed(s.handleListAudit))
+
+	// MCP (Model Context Protocol) endpoint - JSON-RPC over Streamable HTTP. It
+	// does its own bearer auth so it can answer an unauthenticated request with
+	// the 401 + WWW-Authenticate that bootstraps the OAuth flow below.
+	mux.HandleFunc("POST /mcp", s.handleMCP)
+	mux.HandleFunc("GET /mcp", s.handleMCPGet)
+
+	// OAuth 2.1 authorization server backing the MCP connector (see handlers_oauth.go).
+	mux.HandleFunc("GET /.well-known/oauth-protected-resource", s.handleOAuthProtectedResource)
+	mux.HandleFunc("GET /.well-known/oauth-protected-resource/mcp", s.handleOAuthProtectedResource)
+	mux.HandleFunc("GET /.well-known/oauth-authorization-server", s.handleOAuthAuthorizationServer)
+	mux.HandleFunc("GET /.well-known/oauth-authorization-server/mcp", s.handleOAuthAuthorizationServer)
+	mux.HandleFunc("POST /oauth/register", s.handleOAuthRegister)
+	mux.HandleFunc("GET /oauth/authorize", s.handleOAuthAuthorizeGet)
+	mux.HandleFunc("POST /oauth/authorize", s.handleOAuthAuthorizePost)
+	mux.HandleFunc("POST /oauth/token", s.handleOAuthToken)
+	mux.HandleFunc("POST /oauth/revoke", s.handleOAuthRevoke)
+}
+
+// internalHandler returns an unmiddlewared route table used by the MCP tool
+// dispatcher to replay synthesized HTTP requests against the CRM handlers. It
+// excludes the request-logging and rate-limit middleware (a tool call is not a
+// public request) but keeps per-route bearer auth, so a tool runs with exactly
+// the permissions of the token that called /mcp.
+func (s *Server) internalHandler() http.Handler {
+	s.internalOnce.Do(func() {
+		mux := http.NewServeMux()
+		s.Routes(mux)
+		s.internalMux = mux
+	})
+	return s.internalMux
 }
 
 // Middleware applies crmkit's request logging and per-client-IP rate limiting
@@ -224,6 +262,13 @@ func (s *Server) clientIP(r *http.Request) string {
 // session to the request context.
 func (s *Server) authed(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// Internal MCP tool dispatch resolves the token once and injects the
+		// session into the context; reuse it rather than resolving again. The
+		// context key is unexported, so only trusted in-process callers can set it.
+		if sess := sessionFrom(r); sess.TokenID != "" {
+			next(w, r)
+			return
+		}
 		token := bearerToken(r)
 		if token == "" {
 			render.Error(w, r, http.StatusUnauthorized, "auth_required",

@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Sign in to crmkit</title>
+    <style>
+      :root {
+        color-scheme: light;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: #fafafa;
+        font-family: -apple-system, 'Segoe UI', Roboto, Helvetica, Arial,
+          sans-serif;
+        color: #111;
+      }
+      .wrap {
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
+      }
+      .card {
+        width: 100%;
+        max-width: 380px;
+        background: #fff;
+        border: 1px solid #ececec;
+        border-radius: 14px;
+        padding: 30px 32px;
+      }
+      .brand {
+        text-align: center;
+        margin-bottom: 22px;
+      }
+      .brand img {
+        display: inline-block;
+        border: 0;
+      }
+      .brand .wordmark {
+        font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+        font-size: 15px;
+        letter-spacing: 3px;
+        color: #111;
+        margin-top: 6px;
+      }
+      h1 {
+        font-size: 18px;
+        font-weight: 600;
+        margin: 0 0 6px;
+      }
+      p.sub {
+        font-size: 13px;
+        color: #777;
+        margin: 0 0 20px;
+        line-height: 1.5;
+      }
+      label {
+        display: block;
+        font-size: 12px;
+        color: #555;
+        margin: 0 0 6px;
+      }
+      input[type='email'],
+      input[type='text'] {
+        width: 100%;
+        font-size: 15px;
+        padding: 11px 12px;
+        border: 1px solid #ddd;
+        border-radius: 9px;
+        outline: none;
+      }
+      input[type='text'] {
+        font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+        letter-spacing: 5px;
+        text-align: center;
+      }
+      input:focus {
+        border-color: #111;
+      }
+      button {
+        width: 100%;
+        margin-top: 16px;
+        background: #111;
+        color: #fff;
+        border: 0;
+        font-size: 14px;
+        font-weight: 600;
+        padding: 12px;
+        border-radius: 9px;
+        cursor: pointer;
+      }
+      .msg {
+        font-size: 13px;
+        border-radius: 9px;
+        padding: 10px 12px;
+        margin: 0 0 16px;
+        line-height: 1.45;
+      }
+      .msg.ok {
+        background: #f0f7f0;
+        color: #2b6a2b;
+      }
+      .msg.err {
+        background: #fdf0f0;
+        color: #a23;
+      }
+      .ws {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        border: 1px solid #e3e3e3;
+        border-radius: 9px;
+        padding: 11px 12px;
+        margin: 8px 0;
+        font-size: 14px;
+        cursor: pointer;
+      }
+      .ws:hover {
+        border-color: #111;
+      }
+      .ws input {
+        margin: 0;
+      }
+      .ws span {
+        color: #999;
+        font-size: 12px;
+        margin-left: auto;
+      }
+      .foot {
+        font-size: 11px;
+        color: #aaa;
+        text-align: center;
+        margin-top: 18px;
+        word-break: break-all;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="card">
+        <div class="brand">
+          <img
+            src="https://crmkit.ai/icon-black.png"
+            width="44"
+            height="44"
+            alt="crmkit"
+          />
+          <div class="wordmark">crmkit</div>
+        </div>
+        {{if eq .Step "error"}}
+        <h1>Can't sign in</h1>
+        <div class="msg err">{{.Error}}</div>
+        {{else if eq .Step "workspace"}}
+        <h1>Choose a workspace</h1>
+        <p class="sub">
+          You belong to more than one workspace. Pick the one this connection
+          should operate in.
+        </p>
+        {{if .Error}}
+        <div class="msg err">{{.Error}}</div>
+        {{end}}
+        <form method="post" action="/oauth/authorize">
+          {{template "params" .}}
+          <input type="hidden" name="email" value="{{.Email}}" />
+          <input type="hidden" name="login_ticket" value="{{.Ticket}}" />
+          {{range .Workspaces}}
+          <label class="ws"
+            ><input
+              type="radio"
+              name="workspace_id"
+              value="{{.ID}}"
+              required
+            />{{.Name}}<span>{{.Role}}</span></label
+          >
+          {{end}}
+          <button type="submit">Connect</button>
+        </form>
+        {{else}}
+        <h1>{{if .ClientName}}Connect {{.ClientName}}{{else}}Sign in{{end}}</h1>
+        <p class="sub">
+          {{if eq .Step "code"}}Enter the code we emailed you to authorize
+          access.{{else}}Sign in with your email to authorize this connection to
+          your crmkit workspace.{{end}}
+        </p>
+        {{if .Error}}
+        <div class="msg err">{{.Error}}</div>
+        {{end}} {{if .Message}}
+        <div class="msg ok">{{.Message}}</div>
+        {{end}}
+        <form method="post" action="/oauth/authorize">
+          {{template "params" .}} {{if eq .Step "code"}}
+          <input type="hidden" name="email" value="{{.Email}}" />
+          <label for="code">6-digit code</label>
+          <input
+            id="code"
+            name="code"
+            type="text"
+            inputmode="numeric"
+            autocomplete="one-time-code"
+            maxlength="6"
+            autofocus
+            required
+          />
+          <button type="submit">Authorize</button>
+          {{else}}
+          <label for="email">Email address</label>
+          <input
+            id="email"
+            name="email"
+            type="email"
+            autocomplete="email"
+            value="{{.Email}}"
+            placeholder="you@example.com"
+            autofocus
+            required
+          />
+          <button type="submit">Email me a code</button>
+          {{end}}
+        </form>
+        {{end}}
+        <div class="foot">crmkit &middot; agent-first CRM</div>
+      </div>
+    </div>
+  </body>
+</html>
+{{define "params"}}<input
+  type="hidden"
+  name="response_type"
+  value="{{.ResponseType}}"
+/>
+<input type="hidden" name="client_id" value="{{.ClientID}}" />
+<input type="hidden" name="redirect_uri" value="{{.RedirectURI}}" />
+<input type="hidden" name="code_challenge" value="{{.CodeChallenge}}" />
+<input
+  type="hidden"
+  name="code_challenge_method"
+  value="{{.CodeChallengeMethod}}"
+/>
+<input type="hidden" name="state" value="{{.State}}" />
+<input type="hidden" name="scope" value="{{.Scope}}" />{{end}}

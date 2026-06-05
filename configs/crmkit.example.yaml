@@ -135,14 +135,33 @@ plans:
   default: basic
   catalogue:
     basic:
-      max_workspaces: 3 # per user (how many a user may create)
-      max_members: 5 # per workspace (members + pending invites)
+      max_workspaces: 1 # per user (how many a user may create)
+      max_members: 1 # per workspace (members + pending invites)
       max_contacts: 1000
-      max_companies: 500
-      max_deals: 1000
+      max_companies: 100
+      max_deals: 100
     # pro:
     #   max_workspaces: 25
     #   max_members: 50
     #   max_contacts: 100000
     #   max_companies: 50000
     #   max_deals: 100000
+
+# MCP: the Model Context Protocol connector at POST /mcp, plus the OAuth 2.1
+# authorization server (dynamic client registration + PKCE) that lets standard
+# chat clients (ChatGPT, Claude) connect with one click. The access token issued
+# is a normal crmkit bearer token, and the authorize page drives crmkit's email-
+# OTP login - so the user just pastes the code they're emailed and gets redirected
+# back. No extra credentials to manage.
+mcp:
+  # Which OAuth redirect_uris a client may register. The default ["*"] accepts
+  # any callback (kept safe by mandatory PKCE S256). Lock it down to known
+  # clients by listing exact URLs, or entries ending in "*" for a prefix match.
+  allowed_redirect_uris: ['*']
+  # How long an issued authorization code stays valid before it must be exchanged
+  # at /oauth/token (codes are single-use). Default 600.
+  auth_code_ttl_seconds: 600
+  # How long an issued refresh token stays valid. Refresh tokens are rotated on
+  # use (each refresh issues a fresh one), so this bounds how long a connection
+  # may sit idle before the user must sign in again. Default 90 days.
+  refresh_ttl_seconds: 7776000

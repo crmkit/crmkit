@@ -61,6 +61,18 @@ type Store interface {
 	PutEscalation(userID, action, target, codeHash string, expiresAt time.Time) error
 	VerifyEscalation(userID, action, target, codeHash string, now time.Time) (bool, error)
 
+	// MCP OAuth: dynamically-registered clients and single-use authorization
+	// codes. The access token they yield is minted via CreateToken, so /mcp
+	// reuses ResolveToken. RevokeTokenByHash backs the revocation endpoint.
+	RegisterOAuthClient(redirectURIs []string, name string) (string, error)
+	GetOAuthClient(clientID string) (OAuthClient, error)
+	PutAuthCode(codeHash string, grant AuthCode, expiresAt time.Time) error
+	ConsumeAuthCode(codeHash string, now time.Time) (AuthCode, error)
+	PutRefreshToken(tokenHash string, grant RefreshGrant, expiresAt time.Time) error
+	ConsumeRefreshToken(tokenHash string, now time.Time) (RefreshGrant, error)
+	RevokeTokenByHash(tokenHash string) error
+	RevokeRefreshTokenByHash(tokenHash string) error
+
 	// workspaces & membership
 	ListWorkspacesForUser(userID string) ([]protocol.Workspace, error)
 	CreateWorkspace(userID, name string) (protocol.Workspace, error)

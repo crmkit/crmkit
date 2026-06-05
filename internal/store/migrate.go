@@ -33,6 +33,43 @@ var migrations = []Migration{
 		`ALTER TABLE workspaces ADD COLUMN plan TEXT NOT NULL DEFAULT 'basic'`,
 		`ALTER TABLE users ADD COLUMN plan TEXT NOT NULL DEFAULT 'basic'`,
 	}},
+	// v3: MCP OAuth 2.1 authorization server. oauth_clients holds dynamically
+	// registered MCP clients (RFC 7591); oauth_codes holds single-use, short-TTL
+	// authorization codes (the PKCE code_challenge is stored, never the verifier).
+	// Both are minted/consumed by the /oauth/* handlers; the access token they
+	// ultimately issue is a normal row in tokens, so /mcp reuses the same auth.
+	{Version: 3, Name: "mcp oauth", Statements: []string{
+		`CREATE TABLE IF NOT EXISTS oauth_clients (
+	id            TEXT PRIMARY KEY,
+	redirect_uris TEXT NOT NULL,
+	client_name   TEXT,
+	created_at    BIGINT NOT NULL
+)`,
+		`CREATE TABLE IF NOT EXISTS oauth_codes (
+	code_hash      TEXT PRIMARY KEY,
+	client_id      TEXT NOT NULL,
+	user_id        TEXT NOT NULL,
+	workspace_id   TEXT NOT NULL,
+	redirect_uri   TEXT NOT NULL,
+	code_challenge TEXT NOT NULL,
+	scope          TEXT,
+	expires_at     BIGINT NOT NULL,
+	created_at     BIGINT NOT NULL
+)`,
+		// oauth_refresh_tokens backs the refresh_token grant. They are rotated on
+		// use (consumed + reissued), so at most one is live per client connection.
+		// The access token they mint is, as always, a row in tokens.
+		`CREATE TABLE IF NOT EXISTS oauth_refresh_tokens (
+	token_hash        TEXT PRIMARY KEY,
+	client_id         TEXT NOT NULL,
+	user_id           TEXT NOT NULL,
+	workspace_id      TEXT NOT NULL,
+	scope             TEXT,
+	access_token_hash TEXT,
+	expires_at        BIGINT NOT NULL,
+	created_at        BIGINT NOT NULL
+)`,
+	}},
 }
 
 // MigrationState reports how the database's schema compares to the code.
