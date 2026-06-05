@@ -1,0 +1,7 @@
+/crmkit
+/crmkitd
+
+configs/crmkit.yaml
+*.db
+*.db-shm
+*.db-wal

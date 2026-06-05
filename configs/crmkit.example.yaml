@@ -1,0 +1,148 @@
+# crmkit server configuration.
+#
+# Every field is optional - crmkitd runs with built-in defaults when no config
+# file is present. Copy this file to ~/.config/crmkit/config.yaml (or pass it
+# with --config) and adjust as needed.
+#
+# ENVIRONMENT VARIABLES (no file required - ideal for containers/serverless):
+# Every field below has a matching env var, CRMKIT_<PATH>, where PATH is the
+# field's path upper-cased with dots as underscores. Env vars override the file.
+#   server.listen_addr   -> CRMKIT_SERVER_LISTEN_ADDR
+#   server.base_url      -> CRMKIT_SERVER_BASE_URL
+#   server.secret_key    -> CRMKIT_SERVER_SECRET_KEY
+#   storage.backend/dsn  -> CRMKIT_STORAGE_BACKEND / CRMKIT_STORAGE_DSN
+#   ratelimit.backend/dsn-> CRMKIT_RATELIMIT_BACKEND / CRMKIT_RATELIMIT_DSN
+#   email.provider/...   -> CRMKIT_EMAIL_PROVIDER / CRMKIT_EMAIL_SMTP_PASS / ...
+# crmkitd boots from env alone with no config file. (Credential fields also still
+# accept inline "$ENV_VAR" references in YAML values.)
+
+server:
+  # Address the HTTP API binds to.
+  listen_addr: ':8080'
+
+  # Public URL agents use to reach the API. Appears in the operating manual
+  # (GET /help) and in outbound emails. Set this to your real domain in prod.
+  base_url: 'https://api.crmkit.ai'
+
+  # SQLite database location. Defaults to ~/.local/share/crmkit/crmkit.db.
+  # db_path: "/var/lib/crmkit/crmkit.db"
+
+  # How long an emailed login code stays valid (seconds).
+  otp_ttl_seconds: 600
+
+  # How long an emailed step-up (escalation) code stays valid (seconds).
+  escalation_ttl_seconds: 600
+
+  # Sliding inactivity window for access tokens (seconds): a token expires this
+  # long after its last use; each use slides the window forward. Default 30 days.
+  # Set very high to effectively disable expiry.
+  token_idle_ttl_seconds: 2592000
+
+  # Set true ONLY when behind a trusted proxy/LB: derives the client IP from
+  # X-Forwarded-For / X-Real-IP (spoofable if the server is exposed directly).
+  trust_proxy_headers: false
+
+  # Structured log format: "text" (default) or "json".
+  log_format: 'text'
+
+  # Secret that keys the HMAC hashing of login/step-up codes, so a read-only
+  # database leak can't brute-force active codes. REQUIRED in production and must
+  # be the SAME across all instances. If empty, an ephemeral key is generated at
+  # startup (codes then break on restart / across replicas). Use a long random
+  # value; "$ENV_VAR" is supported.
+  # secret_key: "$CRMKIT_SECRET_KEY"
+
+  # Local mode: single-user instance with no mail provider. Login/step-up codes
+  # are logged and echoed in the /auth/request response so an agent on the same
+  # machine can authenticate itself without email. For running crmkit on your
+  # own box next to your agent - NEVER expose a local-mode instance to the
+  # internet (anyone who can reach it can read the codes). With no email provider
+  # configured, crmkitd refuses to start unless local is true.
+  local: false
+
+# Rate limiting. The backend is pluggable: "memory" (default, in-process - right
+# for a single instance) or "redis" (shared, needed when running multiple
+# replicas so the limit is global rather than per-instance).
+ratelimit:
+  backend: memory # memory | redis
+  # dsn: "redis://localhost:6379/0"  # required when backend: redis
+  rps: 20 # per-client-IP requests/sec (negative disables)
+  burst: 40
+  auth_per_hour: 20 # stricter per-email cap on login attempts
+
+# ---
+
+# Storage backend. SQLite (the default) is a single file - ideal for local and
+# small deployments. For production, point the DSN at Postgres. The backend is
+# inferred from the DSN, so usually you only set `dsn`.
+storage:
+  # dsn: ""                        # sqlite: file path (defaults to server.db_path)
+  #                                # postgres: "postgres://user:pass@host:5432/crmkit?sslmode=require"
+
+  # backend is optional and normally omitted - it's inferred from the DSN
+  # ("postgres://" or "postgresql://" → postgres, otherwise sqlite). Set it only
+  # to override inference, e.g. a libpq keyword/value postgres DSN
+  # ("host=… dbname=…"), which has no URL scheme to sniff.
+  # backend: postgres              # sqlite | postgres
+
+  # Connection pool (postgres only; sqlite is single-connection). Omit/0 = defaults.
+  # max_open_conns: 10
+  # max_idle_conns: 5
+  # conn_max_lifetime_seconds: 3600
+
+# Outbound email (login codes, reminders). Delivery is provider-based and
+# swappable. Set `provider` explicitly, or leave it blank to infer one from the
+# fields below. With no provider, crmkit runs in "log" mode and prints messages
+# (including login codes) to the console instead of sending them.
+email:
+  # provider: log | smtp | resend | ses | cloudflare   (blank = infer)
+  provider: ''
+  from: 'crmkit <no-reply@crmkit.ai>'
+
+  # --- provider: smtp (also Postmark, Mailgun, or SES SMTP, …) ---
+  # smtp_host: "smtp.postmarkapp.com"
+  # smtp_port: 587
+  # smtp_user: "$CRMKIT_SMTP_USER"
+  # smtp_pass: "$CRMKIT_SMTP_PASS"
+
+  # --- provider: resend (https://resend.com) ---
+  # resend_api_key: "$RESEND_API_KEY"
+
+  # --- provider: ses (Amazon SES v2 API, SigV4-signed, no AWS SDK) ---
+  # ses_region: "us-east-1"
+  # ses_access_key_id: "$AWS_ACCESS_KEY_ID"
+  # ses_secret_access_key: "$AWS_SECRET_ACCESS_KEY"
+  # ses_session_token: "$AWS_SESSION_TOKEN"          # optional, for STS creds
+  # (the `from` address must be a verified SES identity)
+
+  # --- provider: cloudflare (Cloudflare Email Service REST API) ---
+  # cloudflare_account_id: "$CLOUDFLARE_ACCOUNT_ID"
+  # cloudflare_api_token: "$CRMKIT_CLOUDFLARE_API_TOKEN"
+  # (the `from` domain must be verified for sending in the Cloudflare dashboard;
+  #  DKIM/SPF records are auto-managed when the domain's DNS is on Cloudflare)
+
+# ---
+
+# Plans: per-tenant resource limits. Every user and workspace is assigned a plan
+# (default below); creating an object beyond a plan's limit is rejected with
+# plan_limit_reached. Change a row's plan to grant higher limits ("upgrade").
+# The built-in "basic" plan applies out of the box - override its limits here or
+# add more plans. -1 means unlimited.
+#
+# (This section is a YAML-file feature; being a map it is not settable via
+# CRMKIT_* env vars, so the env-only deployment uses the built-in basic limits.)
+plans:
+  default: basic
+  catalogue:
+    basic:
+      max_workspaces: 3 # per user (how many a user may create)
+      max_members: 5 # per workspace (members + pending invites)
+      max_contacts: 1000
+      max_companies: 500
+      max_deals: 1000
+    # pro:
+    #   max_workspaces: 25
+    #   max_members: 50
+    #   max_contacts: 100000
+    #   max_companies: 50000
+    #   max_deals: 100000

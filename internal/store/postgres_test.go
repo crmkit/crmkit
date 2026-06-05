@@ -1,0 +1,135 @@
+package store
+
+import (
+	"os"
+	"testing"
+	"time"
+
+	"github.com/crmkit/crmkit/internal/protocol"
+)
+
+// pgTestStore opens a Postgres-backed store for tests when CRMKIT_TEST_POSTGRES_DSN
+// is set, and resets the schema so each run starts clean. Without the env var the
+// Postgres integration tests are skipped (so `go test` stays hermetic by default).
+func pgTestStore(t *testing.T) *sqlStore {
+	t.Helper()
+	dsn := os.Getenv("CRMKIT_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("set CRMKIT_TEST_POSTGRES_DSN to run Postgres integration tests")
+	}
+	st, err := openPostgres(dsn, Options{})
+	if err != nil {
+		t.Fatalf("open postgres: %v", err)
+	}
+	// Open no longer creates schema; ensure it exists (idempotent) before reset.
+	if _, err := st.ApplyMigrations(); err != nil {
+		t.Fatalf("apply migrations: %v", err)
+	}
+	// Start from a clean slate.
+	for _, tbl := range []string{
+		"audit_log", "activities", "deals", "companies", "contacts",
+		"tokens", "escalations", "otps", "invites", "memberships", "users", "workspaces",
+	} {
+		if _, err := st.db.Exec("DELETE FROM " + tbl); err != nil {
+			t.Fatalf("reset %s: %v", tbl, err)
+		}
+	}
+	t.Cleanup(func() { st.Close() })
+	return st
+}
+
+// TestPostgresPoolConfig verifies the configurable pool size reaches the
+// underlying *sql.DB.
+func TestPostgresPoolConfig(t *testing.T) {
+	dsn := os.Getenv("CRMKIT_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("set CRMKIT_TEST_POSTGRES_DSN to run Postgres integration tests")
+	}
+	st, err := openPostgres(dsn, Options{MaxOpenConns: 7, MaxIdleConns: 3, ConnMaxLifetime: time.Minute})
+	if err != nil {
+		t.Fatalf("open postgres: %v", err)
+	}
+	defer st.Close()
+	if got := st.db.Stats().MaxOpenConnections; got != 7 {
+		t.Fatalf("expected MaxOpenConnections=7, got %d", got)
+	}
+}
+
+// TestPostgresEndToEnd exercises the same behaviors as the SQLite suite against
+// a real Postgres, proving the dialect layer (placeholder rebind, ILIKE, schema)
+// is correct.
+func TestPostgresEndToEnd(t *testing.T) {
+	st := pgTestStore(t)
+
+	// Identity + workspace provisioning + admin membership.
+	admin, err := st.GetOrCreateIdentity("admin@acme.com")
+	if err != nil {
+		t.Fatalf("identity: %v", err)
+	}
+	team := admin.DefaultWorkspaceID
+	if role, _ := st.MemberRole(team, admin.ID); role != protocol.RoleAdmin {
+		t.Fatalf("expected admin, got %q", role)
+	}
+
+	// Token round-trip + sliding expiry.
+	st.SetTokenIdleTTL(time.Hour)
+	if _, err := st.CreateToken(admin.ID, team, "default", "tokhash"); err != nil {
+		t.Fatalf("create token: %v", err)
+	}
+	if sess, err := st.ResolveToken("tokhash"); err != nil || sess.WorkspaceID != team {
+		t.Fatalf("resolve token: %v", err)
+	}
+
+	// Contacts: create + case-insensitive search (exercises ILIKE) + isolation.
+	c := &protocol.Contact{Name: "Jane Doe", Email: "jane@ACME.com", Stage: "lead", Tags: []string{"vip"}, Custom: map[string]any{"src": "web"}}
+	if err := st.CreateContact(team, c); err != nil {
+		t.Fatalf("create contact: %v", err)
+	}
+	// lowercase search vs mixed-case data exercises ILIKE on Postgres.
+	found, _, err := st.QueryContacts(team, Query{Search: "acme", SearchColumns: []string{"name", "email"}, SortColumn: "updated_at", SortDesc: true, SortNumeric: true, Limit: 10})
+	if err != nil || len(found) != 1 {
+		t.Fatalf("ILIKE search failed: err=%v n=%d", err, len(found))
+	}
+	if found[0].Custom["src"] != "web" || len(found[0].Tags) != 1 {
+		t.Fatalf("json roundtrip mismatch: %+v", found[0])
+	}
+
+	// Invite -> join -> shared workspace visibility.
+	if _, err := st.CreateInvite(team, "mate@acme.com", protocol.RoleMember, admin.ID); err != nil {
+		t.Fatalf("invite: %v", err)
+	}
+	mate, _ := st.GetOrCreateIdentity("mate@acme.com")
+	if role, err := st.MemberRole(team, mate.ID); err != nil || role != protocol.RoleMember {
+		t.Fatalf("invite join failed: role=%q err=%v", role, err)
+	}
+
+	// Deals + pipeline filter.
+	_ = st.CreateDeal(team, &protocol.Deal{Title: "Acme renewal", Stage: "proposal", AmountCents: 500000, Currency: "USD", ContactID: c.ID})
+	open, _, err := st.QueryDeals(team, Query{
+		Filters:    []QFilter{{Column: "status", Op: "=", Value: "open"}, {Column: "amount_cents", Op: ">=", Value: int64(100000)}},
+		SortColumn: "amount_cents", SortDesc: true, SortNumeric: true, Limit: 10,
+	})
+	if err != nil || len(open) != 1 {
+		t.Fatalf("deal filter: err=%v n=%d", err, len(open))
+	}
+
+	// Escalation single-use + scope.
+	if err := st.PutEscalation(admin.ID, "workspace.delete", team, "h1", time.Now().Add(time.Minute)); err != nil {
+		t.Fatalf("put escalation: %v", err)
+	}
+	if ok, _ := st.VerifyEscalation(admin.ID, "workspace.delete", team, "h1", time.Now()); !ok {
+		t.Fatal("escalation should verify")
+	}
+	if ok, _ := st.VerifyEscalation(admin.ID, "workspace.delete", team, "h1", time.Now()); ok {
+		t.Fatal("escalation should be single-use")
+	}
+
+	// Cascade delete + audit.
+	_ = st.WriteAudit(team, "tok", "contact.create", "contact/"+c.ID, "Jane Doe")
+	if err := st.DeleteWorkspace(team); err != nil {
+		t.Fatalf("delete workspace: %v", err)
+	}
+	if _, err := st.GetContact(team, c.ID); err != ErrNotFound {
+		t.Fatalf("expected cascade delete, got %v", err)
+	}
+}
