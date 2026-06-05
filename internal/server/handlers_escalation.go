@@ -49,7 +49,9 @@ func (s *Server) requireEscalation(w http.ResponseWriter, r *http.Request, sess 
 			s.log.Info("escalation code (local)",
 				slog.String("email", sess.Email), slog.String("action", action), slog.String("code", c))
 		}
-		_ = s.mailer.Send(auth.EscalationEmail(sess.Email, desc, c, int(s.escalationTTL().Minutes())))
+		if err := s.mailer.Send(auth.EscalationEmail(sess.Email, desc, c, int(s.escalationTTL().Minutes()))); err != nil {
+			s.log.Error("escalation email send failed", slog.String("email", sess.Email), slog.String("action", action), slog.String("error", err.Error()))
+		}
 
 		hint := fmt.Sprintf("This action (%s) needs email confirmation. A code was sent to %s. Ask the user for it, then repeat this exact request with ?code=<code>.", desc, sess.Email)
 		if s.cfg.Server.Local {

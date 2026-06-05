@@ -71,6 +71,7 @@ func (s *Server) handleAuthRequest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.mailer.Send(auth.LoginEmail(email, code, s.cfg.Server.OTPTTLSeconds/60)); err != nil {
+		s.log.Error("login email send failed", slog.String("email", email), slog.String("error", err.Error()))
 		render.Error(w, r, http.StatusInternalServerError, "email_failed", "Could not send the login email. Try again.")
 		return
 	}

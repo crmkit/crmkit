@@ -48,9 +48,38 @@ func TestCloudflareMailerSend(t *testing.T) {
 	if err := json.Unmarshal(body, &payload); err != nil {
 		t.Fatalf("body not json: %v", err)
 	}
-	if payload["from"] != "crmkit <no-reply@crmkit.ai>" || payload["to"] != "user@example.com" ||
-		payload["subject"] != "Your code" || payload["text"] != "123456" || payload["html"] != "<b>123456</b>" {
+	// A "Name <addr>" from must be sent as Cloudflare's {address, name} object,
+	// not the display-name string (which Cloudflare rejects).
+	from, ok := payload["from"].(map[string]any)
+	if !ok || from["address"] != "no-reply@crmkit.ai" || from["name"] != "crmkit" {
+		t.Errorf("from = %v, want {address:no-reply@crmkit.ai, name:crmkit}", payload["from"])
+	}
+	if payload["to"] != "user@example.com" || payload["subject"] != "Your code" ||
+		payload["text"] != "123456" || payload["html"] != "<b>123456</b>" {
 		t.Errorf("payload = %v", payload)
+	}
+}
+
+func TestCloudflareAddress(t *testing.T) {
+	cases := []struct {
+		in   string
+		want any
+	}{
+		{"no-reply@crmkit.ai", "no-reply@crmkit.ai"},
+		{"crmkit <no-reply@crmkit.ai>", map[string]any{"address": "no-reply@crmkit.ai", "name": "crmkit"}},
+		{`"crmkit team" <no-reply@crmkit.ai>`, map[string]any{"address": "no-reply@crmkit.ai", "name": "crmkit team"}},
+		{"<no-reply@crmkit.ai>", "no-reply@crmkit.ai"},
+	}
+	for _, c := range cases {
+		got := cloudflareAddress(c.in)
+		if gm, ok := c.want.(map[string]any); ok {
+			am, ok := got.(map[string]any)
+			if !ok || am["address"] != gm["address"] || am["name"] != gm["name"] {
+				t.Errorf("cloudflareAddress(%q) = %v, want %v", c.in, got, c.want)
+			}
+		} else if got != c.want {
+			t.Errorf("cloudflareAddress(%q) = %v, want %v", c.in, got, c.want)
+		}
 	}
 }
 

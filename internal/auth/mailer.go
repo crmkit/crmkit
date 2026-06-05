@@ -145,7 +145,7 @@ type CloudflareMailer struct {
 // Send delivers a text + HTML email via the Cloudflare Email Service API.
 func (m *CloudflareMailer) Send(e Email) error {
 	payload, err := json.Marshal(map[string]any{
-		"from":    m.from,
+		"from":    cloudflareAddress(m.from),
 		"to":      e.To,
 		"subject": e.Subject,
 		"text":    e.Text,
@@ -174,4 +174,21 @@ func (m *CloudflareMailer) Send(e Email) error {
 		return fmt.Errorf("cloudflare email returned %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
 	}
 	return nil
+}
+
+// cloudflareAddress renders a From value for the Cloudflare Email API. Cloudflare
+// wants a bare email string or a {address, name} object — it rejects the RFC 5322
+// "Name <addr>" display-name string that other providers accept. So split that
+// form into the object; pass a bare address through as a string.
+func cloudflareAddress(from string) any {
+	from = strings.TrimSpace(from)
+	if i := strings.LastIndexByte(from, '<'); i >= 0 && strings.HasSuffix(from, ">") {
+		addr := strings.TrimSpace(from[i+1 : len(from)-1])
+		name := strings.Trim(strings.TrimSpace(from[:i]), `"`)
+		if name != "" {
+			return map[string]any{"address": addr, "name": name}
+		}
+		return addr
+	}
+	return from
 }
