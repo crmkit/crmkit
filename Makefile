@@ -1,0 +1,36 @@
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+LDFLAGS  = -s -w -X github.com/crmkit/crmkit/internal/version.Version=$(VERSION)
+
+CMDS = crmkitd
+
+.PHONY: all build clean test vet lint fmt cross
+
+all: build
+
+build:
+	@for cmd in $(CMDS); do \
+		echo "Building $$cmd ($(VERSION))..."; \
+		CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o $$cmd ./cmd/$$cmd; \
+	done
+
+fmt:
+	go fmt ./...
+
+test:
+	go test ./... -count=1
+
+vet:
+	go vet ./...
+
+lint: vet
+	@echo "lint ok"
+
+clean:
+	rm -f $(CMDS)
+
+# Cross-compile a specific platform: make cross GOOS=darwin GOARCH=arm64
+cross:
+	@for cmd in $(CMDS); do \
+		echo "Building $$cmd ($(VERSION)) for $(GOOS)/$(GOARCH)..."; \
+		CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=$(GOARCH) go build -trimpath -ldflags "$(LDFLAGS)" -o $$cmd ./cmd/$$cmd; \
+	done
