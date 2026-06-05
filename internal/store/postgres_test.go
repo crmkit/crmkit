@@ -27,6 +27,7 @@ func pgTestStore(t *testing.T) *sqlStore {
 	}
 	// Start from a clean slate.
 	for _, tbl := range []string{
+		"oauth_refresh_tokens", "oauth_codes", "oauth_clients",
 		"audit_log", "activities", "deals", "companies", "contacts",
 		"tokens", "escalations", "otps", "invites", "memberships", "users", "workspaces",
 	} {
@@ -131,5 +132,79 @@ func TestPostgresEndToEnd(t *testing.T) {
 	}
 	if _, err := st.GetContact(team, c.ID); err != ErrNotFound {
 		t.Fatalf("expected cascade delete, got %v", err)
+	}
+}
+
+// TestPostgresOAuth runs the MCP OAuth store layer against a real Postgres,
+// proving the schema and the single-statement DELETE ... RETURNING consume path
+// work under pgx (not just SQLite). Mirrors oauth_test.go.
+func TestPostgresOAuth(t *testing.T) {
+	st := pgTestStore(t)
+	now := time.Now()
+
+	// Client registration round-trip.
+	clientID, err := st.RegisterOAuthClient([]string{"https://app.example/cb"}, "PG Client")
+	if err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	c, err := st.GetOAuthClient(clientID)
+	if err != nil || c.Name != "PG Client" || len(c.RedirectURIs) != 1 {
+		t.Fatalf("get client: %v %+v", err, c)
+	}
+	if _, err := st.GetOAuthClient("mcpc_missing"); err != ErrNotFound {
+		t.Fatalf("missing client should be ErrNotFound, got %v", err)
+	}
+
+	// Authorization code: single-use via DELETE ... RETURNING.
+	code := AuthCode{ClientID: clientID, UserID: "u1", WorkspaceID: "w1", RedirectURI: "https://app.example/cb", CodeChallenge: "chal", Scope: "crm"}
+	if err := st.PutAuthCode("ac-1", code, now.Add(time.Minute)); err != nil {
+		t.Fatalf("put auth code: %v", err)
+	}
+	got, err := st.ConsumeAuthCode("ac-1", now)
+	if err != nil || got.CodeChallenge != "chal" || got.WorkspaceID != "w1" {
+		t.Fatalf("consume auth code: %v %+v", err, got)
+	}
+	if _, err := st.ConsumeAuthCode("ac-1", now); err != ErrNotFound {
+		t.Fatalf("auth code should be single-use, got %v", err)
+	}
+	if err := st.PutAuthCode("ac-exp", code, now.Add(-time.Second)); err != nil {
+		t.Fatalf("put expired: %v", err)
+	}
+	if _, err := st.ConsumeAuthCode("ac-exp", now); err != ErrNotFound {
+		t.Fatalf("expired auth code should be ErrNotFound, got %v", err)
+	}
+
+	// Refresh token: rotation single-use + paired access hash.
+	rg := RefreshGrant{ClientID: clientID, UserID: "u1", WorkspaceID: "w1", Scope: "crm", AccessTokenHash: "acc-hash"}
+	if err := st.PutRefreshToken("rt-1", rg, now.Add(time.Hour)); err != nil {
+		t.Fatalf("put refresh: %v", err)
+	}
+	rgot, err := st.ConsumeRefreshToken("rt-1", now)
+	if err != nil || rgot.AccessTokenHash != "acc-hash" {
+		t.Fatalf("consume refresh: %v %+v", err, rgot)
+	}
+	if _, err := st.ConsumeRefreshToken("rt-1", now); err != ErrNotFound {
+		t.Fatalf("refresh should be single-use, got %v", err)
+	}
+
+	// Revoke-by-hash for a real access token row, and for a refresh token.
+	user, _ := st.GetOrCreateIdentity("pgoauth@acme.com")
+	if _, err := st.CreateToken(user.ID, user.DefaultWorkspaceID, "t", "tok-hash"); err != nil {
+		t.Fatalf("create token: %v", err)
+	}
+	if err := st.RevokeTokenByHash("tok-hash"); err != nil {
+		t.Fatalf("revoke token: %v", err)
+	}
+	if _, err := st.ResolveToken("tok-hash"); err != ErrNotFound {
+		t.Fatalf("revoked token should not resolve, got %v", err)
+	}
+	if err := st.PutRefreshToken("rt-x", rg, now.Add(time.Hour)); err != nil {
+		t.Fatalf("put refresh x: %v", err)
+	}
+	if err := st.RevokeRefreshTokenByHash("rt-x"); err != nil {
+		t.Fatalf("revoke refresh: %v", err)
+	}
+	if _, err := st.ConsumeRefreshToken("rt-x", now); err != ErrNotFound {
+		t.Fatalf("revoked refresh should be gone, got %v", err)
 	}
 }

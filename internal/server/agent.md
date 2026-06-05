@@ -16,7 +16,7 @@ You are talking to crmkit, an agent-first CRM built for you to operate. It is
 headless - there is no UI; you (the agent) are the interface. Drive it with
 plain HTTP requests using your fetch/HTTP tool.
 
-BASE_URL: https://api.crmkit.ai
+BASE_URL: <base_url>
 AUTH:     send the header  Authorization: Bearer <token>  on every request.
 FORMAT:   responses are plain text by default (one labeled line per record).
           Add the header  Accept: application/json  (or ?format=json) for JSON.
@@ -25,15 +25,32 @@ Records are addressed by a stable handle like  contact/c_ab12...  - reuse that
 handle (or the bare id after the slash) in later calls. You can grep responses:
 each line stands alone.
 
+MCP CONNECTOR (chat clients)
+----------------------------
+Besides this plain HTTP API, crmkit is also a Model Context Protocol server at
+POST <base_url>/mcp, so you can add it as a connector in clients like ChatGPT and
+Claude. Point the client at <base_url>/mcp and it will walk the standard OAuth
+flow automatically: it registers itself (dynamic client registration), opens a
+crmkit sign-in page where the user enters their email and pastes the emailed
+code, then receives a token. Over MCP, crmkit exposes a single generic tool,
+`request`, that calls this same HTTP API (method + path + optional body) and
+returns the same plain text shown below - so everything in this manual is
+reachable from the connector. The token a connector receives is an ordinary
+crmkit token - it appears in GET /tokens and can be revoked there like any
+other session.
+
 FIRST-TIME AUTH
 ---------------
 1. POST /auth/request   {"email":"you@example.com"}
      -> a 6-digit login code is emailed to that address.
 2. Ask the user for the code.
-3. POST /auth/verify    {"email":"you@example.com","code":"123456"}
+3. POST /auth/verify    {"email":"you@example.com","code":"123456","token_name":"<who you are>"}
      -> returns a token. SAVE IT. Send it as Authorization: Bearer <token> from
         now on. If you can persist it in memory, do so; otherwise ask the user
         to keep it for next session.
+   Set "token_name" to label this session - e.g. your client ("ChatGPT",
+   "Claude", "Cursor") or its purpose. It appears in GET /tokens so the user can
+   recognize and revoke sessions. Optional; defaults to "default".
 On any 401 (auth_required / invalid_token / token_expired), repeat this flow.
 Tokens are long-lived but expire after a period of inactivity (each use renews
 them), so a token in regular use keeps working; an idle one eventually dies.
@@ -146,14 +163,12 @@ to look a week ahead. Clear a follow-up by PATCHing follow_up_at to null.
 EXAMPLES (curl)
 ---------------
 # begin login
-curl -s -X POST https://api.crmkit.ai/auth/request -d '{"email":"you@example.com"}'
+curl -s -X POST <base_url>/auth/request -d '{"email":"you@example.com"}'
 
 # create a contact (note the bearer token)
-curl -s -X POST https://api.crmkit.ai/contacts \
+curl -s -X POST <base_url>/contacts \
   -H 'Authorization: Bearer ck_...' \
   -d '{"name":"Jane Doe","email":"jane@acme.com","stage":"lead"}'
 
 Custom fields: any keys you put under "custom" are stored as-is and returned on
 the record, so the schema is extensible without server changes.
-
-<!-- Generated sample for base_url https://api.crmkit.ai. Live (authoritative): <base_url>/.well-known/agent.md ; card: /.well-known/agent.json. -->

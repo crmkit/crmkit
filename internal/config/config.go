@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
 
@@ -20,6 +21,8 @@ const (
 	defaultEscalationTTL = 600     // seconds a step-up code stays valid
 	defaultTokenIdleTTL  = 2592000 // 30 days of inactivity before an access token expires
 	defaultTokenName     = "default"
+	defaultAuthCodeTTL   = 600     // seconds an OAuth authorization code stays valid
+	defaultRefreshTTL    = 7776000 // 90 days before an idle OAuth refresh token dies
 )
 
 // Config is the top-level crmkit server configuration.
@@ -29,6 +32,72 @@ type Config struct {
 	RateLimit RateLimitConfig `yaml:"ratelimit"`
 	Email     EmailConfig     `yaml:"email"`
 	Plans     PlansConfig     `yaml:"plans"`
+	MCP       MCPConfig       `yaml:"mcp"`
+}
+
+// MCPConfig configures the Model Context Protocol surface: the /mcp JSON-RPC
+// endpoint plus the OAuth 2.1 authorization server (dynamic client registration,
+// PKCE authorization-code flow) that lets standard chat clients (ChatGPT,
+// Claude) connect as a one-click connector. The OAuth access token issued is a
+// normal crmkit bearer token, so /mcp reuses the same auth as the HTTP API; the
+// authorize page drives crmkit's existing email-OTP login.
+type MCPConfig struct {
+	// AllowedRedirectURIs gates which OAuth redirect_uris a client may register
+	// (RFC 7591). The default ["*"] accepts any callback - convenient, and kept
+	// safe by mandatory PKCE (S256). Restrict it to exact URLs (or entries ending
+	// in "*" for a prefix match) to lock the server to known clients.
+	AllowedRedirectURIs []string `yaml:"allowed_redirect_uris"`
+
+	// AuthCodeTTLSeconds is how long an issued OAuth authorization code remains
+	// valid before it must be exchanged at /oauth/token. Codes are single-use.
+	AuthCodeTTLSeconds int `yaml:"auth_code_ttl_seconds"`
+
+	// RefreshTTLSeconds is how long an issued OAuth refresh token stays valid.
+	// Refresh tokens are rotated on use (each refresh issues a fresh one with a
+	// new window), so this bounds how long a connection may sit idle before the
+	// user must sign in again. Default 90 days.
+	RefreshTTLSeconds int `yaml:"refresh_ttl_seconds"`
+}
+
+// RedirectURIAllowed reports whether a client may register redirectURI given the
+// configured allowlist. "*" anywhere in the list permits any URI. An entry
+// ending in "*" is an origin-anchored path-prefix match: the redirect must have
+// the SAME scheme and host as the entry and a path under the entry's path - so
+// "https://app.example/*" matches "https://app.example/cb" but NOT the
+// sibling host "https://app.example.evil.com/cb". Any other entry is an exact
+// string match.
+func (m MCPConfig) RedirectURIAllowed(redirectURI string) bool {
+	redirectURI = strings.TrimSpace(redirectURI)
+	if redirectURI == "" {
+		return false
+	}
+	var ru *url.URL
+	for _, allowed := range m.AllowedRedirectURIs {
+		allowed = strings.TrimSpace(allowed)
+		switch {
+		case allowed == "*":
+			return true
+		case strings.HasSuffix(allowed, "*"):
+			// Parse lazily and reuse across entries.
+			if ru == nil {
+				parsed, err := url.Parse(redirectURI)
+				if err != nil {
+					return false
+				}
+				ru = parsed
+			}
+			prefix, err := url.Parse(strings.TrimSuffix(allowed, "*"))
+			if err != nil {
+				continue
+			}
+			if ru.Scheme == prefix.Scheme && ru.Host == prefix.Host && strings.HasPrefix(ru.Path, prefix.Path) {
+				return true
+			}
+		case allowed == redirectURI:
+			return true
+		}
+	}
+	return false
 }
 
 // DefaultPlan is the name of the built-in plan assigned to new users and
@@ -439,6 +508,17 @@ func applyDefaults(cfg *Config) {
 	}
 	if cfg.RateLimit.AuthPerHour < 0 {
 		cfg.RateLimit.AuthPerHour = 0
+	}
+	// MCP/OAuth: accept any registered callback by default (PKCE keeps it safe);
+	// restrict via mcp.allowed_redirect_uris when locking to known clients.
+	if cfg.MCP.AllowedRedirectURIs == nil {
+		cfg.MCP.AllowedRedirectURIs = []string{"*"}
+	}
+	if cfg.MCP.AuthCodeTTLSeconds <= 0 {
+		cfg.MCP.AuthCodeTTLSeconds = defaultAuthCodeTTL
+	}
+	if cfg.MCP.RefreshTTLSeconds <= 0 {
+		cfg.MCP.RefreshTTLSeconds = defaultRefreshTTL
 	}
 }
 

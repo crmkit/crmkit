@@ -118,6 +118,30 @@ GET /activities · GET /audit · GET /help
 `DELETE` is two-step: the first call returns a confirmation token the agent
 echoes back as `?confirm=<token>`.
 
+## MCP connector
+
+crmkit also speaks the **Model Context Protocol** at `POST /mcp`, so it plugs
+into chat clients (ChatGPT, Claude) as a one-click connector. Point the client at
+`<base_url>/mcp` and it walks the standard OAuth 2.1 flow on its own — dynamic
+client registration, then a crmkit sign-in page where the user enters their email
+and pastes the emailed code, then a token. Over MCP, crmkit exposes a single
+generic `request` tool (method + path + optional body) that calls this same HTTP
+API — its description is a compact manual and `GET /help` returns the full one —
+so the whole API is reachable without re-encoding each endpoint as a tool. Tool
+results are the same plain text as the HTTP API.
+
+```
+POST /mcp                                  (JSON-RPC: initialize, tools/list, tools/call)
+GET  /.well-known/oauth-protected-resource (RFC 9728)
+GET  /.well-known/oauth-authorization-server (RFC 8414)
+POST /oauth/register                       (RFC 7591 dynamic client registration)
+GET/POST /oauth/authorize · POST /oauth/token · POST /oauth/revoke
+```
+
+The OAuth access token is an ordinary crmkit token — it shows up in `GET /tokens`
+and is revocable there. `mcp.allowed_redirect_uris` (default `["*"]`, kept safe by
+mandatory PKCE) restricts which client callbacks may register.
+
 ## Development
 
 ```bash
