@@ -1,21 +1,13 @@
-# crmkit
+<p align="center">
+  <img src="https://crmkit.ai/icon-dark.svg" alt="crmkit" width="100" height="100" />
+</p>
+
+<h1 align="center">crmkit</h1>
 
 **An agent-first CRM, built for AI agents to drive over plain HTTP.** Headless
 by design - no UI, no SDK - just a plain-text, grepable API and a one-page
 operating manual the agent loads. The agent (ChatGPT, Claude, Cursor, …) _is_
 the interface.
-
-```
-┌──────────────┐   loads the manual    ┌──────────────────────────┐
-│ landing page │ ───────────────────▶  │ chat client = the only UI │
-└──────────────┘                       └────────────┬─────────────┘
-                                                     │ HTTP + Bearer token
-                                                     ▼
-                                        ┌──────────────────────────┐
-                                        │ crmkitd (Go, single file) │
-                                        │ plain-text API · SQLite   │
-                                        └──────────────────────────┘
-```
 
 ## Why it looks the way it does
 
