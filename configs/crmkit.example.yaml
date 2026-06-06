@@ -140,12 +140,6 @@ plans:
       max_contacts: 1000
       max_companies: 100
       max_deals: 100
-    # pro:
-    #   max_workspaces: 25
-    #   max_members: 50
-    #   max_contacts: 100000
-    #   max_companies: 50000
-    #   max_deals: 100000
 
 # MCP: the Model Context Protocol connector at POST /mcp, plus the OAuth 2.1
 # authorization server (dynamic client registration + PKCE) that lets standard
