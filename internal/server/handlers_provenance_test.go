@@ -24,6 +24,19 @@ func TestRecordStampsCreator(t *testing.T) {
 	if strings.Contains(detail, "evil@attacker.com") {
 		t.Fatalf("client-supplied created_by must be ignored:\n%s", detail)
 	}
+
+	// Upserting the same contact (by email) with a spoofed created_by must not
+	// override the original creator, even in the echoed response.
+	if status, _ := do(t, ts, "POST", "/contacts", token, `{"name":"Jane Doe","email":"upsert@acme.com"}`); status != http.StatusCreated {
+		t.Fatalf("seed upsert contact: %d", status)
+	}
+	_, up := do(t, ts, "POST", "/contacts", token, `{"name":"Jane Doe","email":"upsert@acme.com","created_by":"evil@attacker.com","stage":"customer"}`)
+	if !strings.Contains(up, "# updated") {
+		t.Fatalf("expected an upsert (# updated):\n%s", up)
+	}
+	if strings.Contains(up, "evil@attacker.com") || !strings.Contains(up, "me@example.com") {
+		t.Fatalf("upsert must keep the real creator in the echo, not the client value:\n%s", up)
+	}
 }
 
 func TestCreatedByFilter(t *testing.T) {

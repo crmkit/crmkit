@@ -97,10 +97,12 @@ func (s *Server) handleCreateContact(w http.ResponseWriter, r *http.Request) {
 		}
 		if len(matches) == 1 {
 			existing := matches[0]
+			creator := existing.CreatedBy                        // server-owned; never overridable by the body
 			if err := decodeBytes(body, &existing); err != nil { // merge provided fields onto the match
 				render.Error(w, r, http.StatusBadRequest, "bad_request", "Invalid JSON body.")
 				return
 			}
+			existing.CreatedBy = creator
 			if err := s.store.UpdateContact(sess.WorkspaceID, &existing); err != nil {
 				s.serverErr(w, r)
 				return
@@ -277,10 +279,12 @@ func (s *Server) handleCreateCompany(w http.ResponseWriter, r *http.Request) {
 		}
 		if len(matches) == 1 {
 			existing := matches[0]
+			creator := existing.CreatedBy // server-owned; never overridable by the body
 			if err := decodeBytes(body, &existing); err != nil {
 				render.Error(w, r, http.StatusBadRequest, "bad_request", "Invalid JSON body.")
 				return
 			}
+			existing.CreatedBy = creator
 			if err := s.store.UpdateCompany(sess.WorkspaceID, &existing); err != nil {
 				s.serverErr(w, r)
 				return
