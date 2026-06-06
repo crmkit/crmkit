@@ -9,7 +9,7 @@ func TestEmailRendering(t *testing.T) {
 	login := LoginEmail("user@example.com", "123456", 10)
 	if !strings.Contains(login.HTML, "123456") ||
 		!strings.Contains(login.HTML, "Your login code") ||
-		!strings.Contains(login.HTML, "icon-black.png") ||
+		!strings.Contains(login.HTML, "https://crmkit.ai/icon-light.png") ||
 		!strings.Contains(login.HTML, "Expires in 10 minutes") {
 		t.Fatalf("login HTML missing expected content:\n%s", login.HTML)
 	}
