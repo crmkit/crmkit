@@ -150,16 +150,18 @@ func (s *sqlStore) QueryContacts(ws string, q Query) ([]protocol.Contact, string
 	if err != nil {
 		return nil, "", err
 	}
-	defer rows.Close()
 	out := []protocol.Contact{} // non-nil so an empty list serializes as [] not null
 	for rows.Next() {
 		c, err := scanContact(rows)
 		if err != nil {
+			rows.Close()
 			return nil, "", err
 		}
 		out = append(out, c)
 	}
-	if err := rows.Err(); err != nil {
+	err = rows.Err()
+	rows.Close() // close before the relation-resolution query (single-connection safety)
+	if err != nil {
 		return nil, "", err
 	}
 	next := ""
@@ -168,6 +170,9 @@ func (s *sqlStore) QueryContacts(ws string, q Query) ([]protocol.Contact, string
 		out = out[:q.Limit]
 		col, _, _ := q.effectiveSort()
 		next = q.nextCursor(contactSortVal(last, col), last.ID)
+	}
+	if err := s.fillContactRefs(ws, out); err != nil {
+		return nil, "", err
 	}
 	return out, next, nil
 }
@@ -208,16 +213,18 @@ func (s *sqlStore) QueryDeals(ws string, q Query) ([]protocol.Deal, string, erro
 	if err != nil {
 		return nil, "", err
 	}
-	defer rows.Close()
 	out := []protocol.Deal{}
 	for rows.Next() {
 		d, err := scanDeal(rows)
 		if err != nil {
+			rows.Close()
 			return nil, "", err
 		}
 		out = append(out, d)
 	}
-	if err := rows.Err(); err != nil {
+	err = rows.Err()
+	rows.Close() // close before the relation-resolution query (single-connection safety)
+	if err != nil {
 		return nil, "", err
 	}
 	next := ""
@@ -226,6 +233,9 @@ func (s *sqlStore) QueryDeals(ws string, q Query) ([]protocol.Deal, string, erro
 		out = out[:q.Limit]
 		col, _, _ := q.effectiveSort()
 		next = q.nextCursor(dealSortVal(last, col), last.ID)
+	}
+	if err := s.fillDealRefs(ws, out); err != nil {
+		return nil, "", err
 	}
 	return out, next, nil
 }

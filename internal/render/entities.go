@@ -10,11 +10,24 @@ import (
 	"github.com/crmkit/crmkit/internal/protocol"
 )
 
-func date(t time.Time) string {
+// stampLayout is compact RFC3339: date + time to the minute + offset, e.g.
+// 2026-06-06T07:14-07:00 (or ...Z for UTC). Unambiguous and standard enough for
+// any LLM to parse, without the noise of seconds. The time is formatted in its
+// own location, so callers localize to the workspace tz before rendering.
+const stampLayout = "2006-01-02T15:04Z07:00"
+
+// Stamp formats an instant as compact RFC3339 in its own location ("" if zero).
+// Exported so callers rendering times outside the entity helpers (e.g. the audit
+// log) share one format.
+func Stamp(t time.Time) string {
 	if t.IsZero() {
 		return ""
 	}
-	return t.UTC().Format("2006-01-02")
+	return t.Format(stampLayout)
+}
+
+func date(t time.Time) string {
+	return Stamp(t)
 }
 
 func datep(t *time.Time) string {
@@ -59,7 +72,7 @@ func ContactLine(c protocol.Contact) string {
 		F("name", c.Name),
 		F("email", c.Email),
 		F("phone", c.Phone),
-		F("company", c.CompanyID),
+		F("company", nameOrID(c.CompanyName, c.CompanyID)),
 		F("stage", c.Stage),
 		F("owner", c.Owner),
 		F("tags", strings.Join(c.Tags, ",")),
@@ -86,7 +99,8 @@ func Contact(c protocol.Contact) string {
 		F("name", c.Name),
 		F("email", c.Email),
 		F("phone", c.Phone),
-		F("company", c.CompanyID),
+		F("company", c.CompanyName),
+		F("company_id", c.CompanyID),
 		F("stage", c.Stage),
 		F("owner", c.Owner),
 		F("tags", strings.Join(c.Tags, ", ")),
@@ -94,10 +108,46 @@ func Contact(c protocol.Contact) string {
 		F("follow_up", datep(c.FollowUpAt)),
 		F("follow_up_note", c.FollowUpNote),
 		F("created", date(c.CreatedAt)),
+		F("created_by", c.CreatedBy),
 		F("updated", date(c.UpdatedAt)),
+		F("activities", countField(c.ActivityCount)),
+		F("last_activity", datep(c.LastActivityAt)),
 	}
 	fields = append(fields, customFields(c.Custom)...)
 	return Record(fields...)
+}
+
+// ---- search --------------------------------------------------------------
+
+// SearchResults renders grouped cross-entity search hits: a section per
+// non-empty type (reusing the per-entity line format) and a combined summary
+// naming the query, so an agent can grep by handle or by type header.
+func SearchResults(query string, contacts []protocol.Contact, companies []protocol.Company, deals []protocol.Deal) string {
+	b := strings.Builder{}
+	if len(contacts) > 0 {
+		b.WriteString("# contacts\n")
+		for _, c := range contacts {
+			b.WriteString(ContactLine(c))
+			b.WriteByte('\n')
+		}
+	}
+	if len(companies) > 0 {
+		b.WriteString("# companies\n")
+		for _, c := range companies {
+			b.WriteString(CompanyLine(c))
+			b.WriteByte('\n')
+		}
+	}
+	if len(deals) > 0 {
+		b.WriteString("# deals\n")
+		for _, d := range deals {
+			b.WriteString(DealLine(d))
+			b.WriteByte('\n')
+		}
+	}
+	fmt.Fprintf(&b, "# %d contact(s), %d company(ies), %d deal(s) for %q",
+		len(contacts), len(companies), len(deals), query)
+	return b.String()
 }
 
 // ---- companies -----------------------------------------------------------
@@ -129,6 +179,7 @@ func Company(c protocol.Company) string {
 		F("name", c.Name),
 		F("domain", c.Domain),
 		F("created", date(c.CreatedAt)),
+		F("created_by", c.CreatedBy),
 		F("updated", date(c.UpdatedAt)),
 	}
 	fields = append(fields, customFields(c.Custom)...)
@@ -144,8 +195,8 @@ func DealLine(d protocol.Deal) string {
 		F("amount", money(d.AmountCents, d.Currency)),
 		F("stage", d.Stage),
 		F("status", d.Status),
-		F("contact", d.ContactID),
-		F("company", d.CompanyID),
+		F("contact", nameOrID(d.ContactName, d.ContactID)),
+		F("company", nameOrID(d.CompanyName, d.CompanyID)),
 		F("followup", datep(d.FollowUpAt)),
 		F("updated", date(d.UpdatedAt)),
 	)
@@ -174,12 +225,17 @@ func Deal(d protocol.Deal) string {
 		F("amount", money(d.AmountCents, d.Currency)),
 		F("stage", d.Stage),
 		F("status", d.Status),
-		F("contact", d.ContactID),
-		F("company", d.CompanyID),
+		F("contact", d.ContactName),
+		F("contact_id", d.ContactID),
+		F("company", d.CompanyName),
+		F("company_id", d.CompanyID),
 		F("follow_up", datep(d.FollowUpAt)),
 		F("follow_up_note", d.FollowUpNote),
 		F("created", date(d.CreatedAt)),
+		F("created_by", d.CreatedBy),
 		F("updated", date(d.UpdatedAt)),
+		F("activities", countField(d.ActivityCount)),
+		F("last_activity", datep(d.LastActivityAt)),
 	}
 	fields = append(fields, customFields(d.Custom)...)
 	return Record(fields...)
@@ -191,9 +247,10 @@ func Deal(d protocol.Deal) string {
 func ActivityLine(a protocol.Activity) string {
 	return Line(protocol.Handle(protocol.KindActivity, a.ID),
 		F("kind", a.Kind),
+		F("by", a.CreatedBy),
 		F("contact", a.ContactID),
 		F("deal", a.DealID),
-		F("at", a.CreatedAt.UTC().Format(time.RFC3339)),
+		F("at", date(a.CreatedAt)),
 		F("body", a.Body),
 	)
 }
@@ -305,6 +362,25 @@ func fallback(v, def string) string {
 		return def
 	}
 	return v
+}
+
+// nameOrID returns the human-readable name when a relation has been resolved,
+// otherwise the raw id (e.g. a deleted/unresolved reference). Empty when both
+// are empty, so the field is omitted.
+func nameOrID(name, id string) string {
+	if name != "" {
+		return name
+	}
+	return id
+}
+
+// countField renders a non-negative count, or "" for zero so the field is
+// omitted (no point showing activities=0).
+func countField(n int) string {
+	if n <= 0 {
+		return ""
+	}
+	return strconv.Itoa(n)
 }
 
 // Int parses an integer query value, returning def on failure.

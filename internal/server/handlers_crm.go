@@ -58,6 +58,7 @@ func (s *Server) handleListContacts(w http.ResponseWriter, r *http.Request) {
 		s.serverErr(w, r)
 		return
 	}
+	list = localizedSlice(list, locationOf(sess))
 	s.respondList(w, r, list, render.Contacts(list), next)
 }
 
@@ -105,6 +106,7 @@ func (s *Server) handleCreateContact(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			s.audit(sess, "contact.upsert", protocol.Handle(protocol.KindContact, existing.ID), "updated")
+			existing = existing.Localized(locationOf(sess))
 			render.Respond(w, r, http.StatusOK, existing, render.Contact(existing)+"\n# updated")
 			return
 		}
@@ -113,11 +115,13 @@ func (s *Server) handleCreateContact(w http.ResponseWriter, r *http.Request) {
 	if !s.enforceWorkspaceQuota(w, r, sess.WorkspaceID, "contacts") {
 		return
 	}
+	c.CreatedBy = sess.Email // stamp the actor; never trust a client-supplied value
 	if err := s.store.CreateContact(sess.WorkspaceID, &c); err != nil {
 		s.serverErr(w, r)
 		return
 	}
 	s.audit(sess, "contact.create", protocol.Handle(protocol.KindContact, c.ID), c.Name)
+	c = c.Localized(locationOf(sess))
 	render.Respond(w, r, http.StatusCreated, c, render.Contact(c)+"\n# created")
 }
 
@@ -132,6 +136,14 @@ func (s *Server) handleGetContact(w http.ResponseWriter, r *http.Request) {
 		s.serverErr(w, r)
 		return
 	}
+	// Best-effort activity summary; a stats hiccup must not fail the fetch.
+	if n, last, err := s.store.ActivityStats(sess.WorkspaceID, c.ID, ""); err == nil {
+		c.ActivityCount = n
+		if !last.IsZero() {
+			c.LastActivityAt = &last
+		}
+	}
+	c = c.Localized(locationOf(sess))
 	render.Respond(w, r, http.StatusOK, c, render.Contact(c))
 }
 
@@ -156,6 +168,7 @@ func (s *Server) handleUpdateContact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.audit(sess, "contact.update", protocol.Handle(protocol.KindContact, c.ID), "")
+	c = c.Localized(locationOf(sess))
 	render.Respond(w, r, http.StatusOK, c, render.Contact(c))
 }
 
@@ -186,6 +199,7 @@ func (s *Server) handleListContactActivities(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	// Enveloped like the paginated lists for a uniform shape; no cursor here.
+	list = localizedSlice(list, locationOf(sess))
 	s.respondList(w, r, list, render.Activities(list), "")
 }
 
@@ -226,6 +240,7 @@ func (s *Server) handleListCompanies(w http.ResponseWriter, r *http.Request) {
 		s.serverErr(w, r)
 		return
 	}
+	list = localizedSlice(list, locationOf(sess))
 	s.respondList(w, r, list, render.Companies(list), next)
 }
 
@@ -271,6 +286,7 @@ func (s *Server) handleCreateCompany(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			s.audit(sess, "company.upsert", protocol.Handle(protocol.KindCompany, existing.ID), "updated")
+			existing = existing.Localized(locationOf(sess))
 			render.Respond(w, r, http.StatusOK, existing, render.Company(existing)+"\n# updated")
 			return
 		}
@@ -279,11 +295,13 @@ func (s *Server) handleCreateCompany(w http.ResponseWriter, r *http.Request) {
 	if !s.enforceWorkspaceQuota(w, r, sess.WorkspaceID, "companies") {
 		return
 	}
+	c.CreatedBy = sess.Email // stamp the actor; never trust a client-supplied value
 	if err := s.store.CreateCompany(sess.WorkspaceID, &c); err != nil {
 		s.serverErr(w, r)
 		return
 	}
 	s.audit(sess, "company.create", protocol.Handle(protocol.KindCompany, c.ID), c.Name)
+	c = c.Localized(locationOf(sess))
 	render.Respond(w, r, http.StatusCreated, c, render.Company(c)+"\n# created")
 }
 
@@ -298,6 +316,7 @@ func (s *Server) handleGetCompany(w http.ResponseWriter, r *http.Request) {
 		s.serverErr(w, r)
 		return
 	}
+	c = c.Localized(locationOf(sess))
 	render.Respond(w, r, http.StatusOK, c, render.Company(c))
 }
 
@@ -321,6 +340,7 @@ func (s *Server) handleUpdateCompany(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.audit(sess, "company.update", protocol.Handle(protocol.KindCompany, c.ID), "")
+	c = c.Localized(locationOf(sess))
 	render.Respond(w, r, http.StatusOK, c, render.Company(c))
 }
 
@@ -355,6 +375,7 @@ func (s *Server) handleListDeals(w http.ResponseWriter, r *http.Request) {
 		s.serverErr(w, r)
 		return
 	}
+	list = localizedSlice(list, locationOf(sess))
 	s.respondList(w, r, list, render.Deals(list), next)
 }
 
@@ -373,11 +394,13 @@ func (s *Server) handleCreateDeal(w http.ResponseWriter, r *http.Request) {
 	if !s.enforceWorkspaceQuota(w, r, sess.WorkspaceID, "deals") {
 		return
 	}
+	d.CreatedBy = sess.Email // stamp the actor; never trust a client-supplied value
 	if err := s.store.CreateDeal(sess.WorkspaceID, &d); err != nil {
 		s.serverErr(w, r)
 		return
 	}
 	s.audit(sess, "deal.create", protocol.Handle(protocol.KindDeal, d.ID), d.Title)
+	d = d.Localized(locationOf(sess))
 	render.Respond(w, r, http.StatusCreated, d, render.Deal(d))
 }
 
@@ -392,6 +415,14 @@ func (s *Server) handleGetDeal(w http.ResponseWriter, r *http.Request) {
 		s.serverErr(w, r)
 		return
 	}
+	// Best-effort activity summary; a stats hiccup must not fail the fetch.
+	if n, last, err := s.store.ActivityStats(sess.WorkspaceID, "", d.ID); err == nil {
+		d.ActivityCount = n
+		if !last.IsZero() {
+			d.LastActivityAt = &last
+		}
+	}
+	d = d.Localized(locationOf(sess))
 	render.Respond(w, r, http.StatusOK, d, render.Deal(d))
 }
 
@@ -416,6 +447,7 @@ func (s *Server) handleUpdateDeal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.audit(sess, "deal.update", protocol.Handle(protocol.KindDeal, d.ID), d.Stage)
+	d = d.Localized(locationOf(sess))
 	render.Respond(w, r, http.StatusOK, d, render.Deal(d))
 }
 
@@ -451,6 +483,7 @@ func (s *Server) handleListReminders(w http.ResponseWriter, r *http.Request) {
 		s.serverErr(w, r)
 		return
 	}
+	list = localizedSlice(list, locationOf(sess))
 	s.respondList(w, r, list, render.Reminders(list), "")
 }
 
@@ -464,23 +497,27 @@ func (s *Server) handleListActivities(w http.ResponseWriter, r *http.Request) {
 		s.serverErr(w, r)
 		return
 	}
+	list = localizedSlice(list, locationOf(sess))
 	s.respondList(w, r, list, render.Activities(list), "")
 }
 
 func (s *Server) handleListAudit(w http.ResponseWriter, r *http.Request) {
 	sess := sessionFrom(r)
-	list, err := s.store.ListAudit(sess.WorkspaceID, render.Int(r.URL.Query().Get("limit"), 50))
+	by := strings.TrimSpace(r.URL.Query().Get("by"))
+	list, err := s.store.ListAudit(sess.WorkspaceID, by, render.Int(r.URL.Query().Get("limit"), 50))
 	if err != nil {
 		s.serverErr(w, r)
 		return
 	}
+	loc := locationOf(sess)
 	lines := strings.Builder{}
 	for _, e := range list {
 		lines.WriteString(render.Line("audit/"+e.ID,
+			render.F("by", e.ActorEmail),
 			render.F("action", e.Action),
 			render.F("target", e.Target),
 			render.F("detail", e.Detail),
-			render.F("at", e.CreatedAt.Format("2006-01-02T15:04:05Z")),
+			render.F("at", render.Stamp(e.CreatedAt.In(loc))),
 		))
 		lines.WriteByte('\n')
 	}

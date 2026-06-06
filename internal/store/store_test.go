@@ -341,6 +341,77 @@ func TestFindContactByEmail(t *testing.T) {
 	}
 }
 
+func TestRelationNameResolution(t *testing.T) {
+	st := newTestStore(t)
+	user, _ := st.GetOrCreateIdentity("a@b.com")
+	ws := user.DefaultWorkspaceID
+
+	co := &protocol.Company{Name: "ACME"}
+	if err := st.CreateCompany(ws, co); err != nil {
+		t.Fatalf("create company: %v", err)
+	}
+
+	// Create echoes the resolved company name back on the contact.
+	jane := &protocol.Contact{Name: "Jane Doe", CompanyID: co.ID}
+	if err := st.CreateContact(ws, jane); err != nil {
+		t.Fatalf("create contact: %v", err)
+	}
+	if jane.CompanyName != "ACME" {
+		t.Fatalf("create should resolve company name, got %q", jane.CompanyName)
+	}
+
+	// Single read resolves the company name.
+	gotC, err := st.GetContact(ws, jane.ID)
+	if err != nil {
+		t.Fatalf("get contact: %v", err)
+	}
+	if gotC.CompanyID != co.ID || gotC.CompanyName != "ACME" {
+		t.Fatalf("get contact: company_id=%q company_name=%q", gotC.CompanyID, gotC.CompanyName)
+	}
+
+	// List read resolves the company name for every row in one shot.
+	contacts, _, err := st.QueryContacts(ws, Query{SortColumn: "updated_at", SortDesc: true, SortNumeric: true, Limit: 10})
+	if err != nil {
+		t.Fatalf("query contacts: %v", err)
+	}
+	if len(contacts) != 1 || contacts[0].CompanyName != "ACME" {
+		t.Fatalf("query contacts resolution failed: %+v", contacts)
+	}
+
+	// Deals resolve both the contact name and the company name.
+	deal := &protocol.Deal{Title: "Big one", ContactID: jane.ID, CompanyID: co.ID}
+	if err := st.CreateDeal(ws, deal); err != nil {
+		t.Fatalf("create deal: %v", err)
+	}
+	if deal.ContactName != "Jane Doe" || deal.CompanyName != "ACME" {
+		t.Fatalf("create deal resolution: contact=%q company=%q", deal.ContactName, deal.CompanyName)
+	}
+	gotD, err := st.GetDeal(ws, deal.ID)
+	if err != nil {
+		t.Fatalf("get deal: %v", err)
+	}
+	if gotD.ContactName != "Jane Doe" || gotD.CompanyName != "ACME" {
+		t.Fatalf("get deal resolution: contact=%q company=%q", gotD.ContactName, gotD.CompanyName)
+	}
+	deals, _, err := st.QueryDeals(ws, Query{SortColumn: "updated_at", SortDesc: true, SortNumeric: true, Limit: 10})
+	if err != nil {
+		t.Fatalf("query deals: %v", err)
+	}
+	if len(deals) != 1 || deals[0].ContactName != "Jane Doe" || deals[0].CompanyName != "ACME" {
+		t.Fatalf("query deals resolution failed: %+v", deals)
+	}
+
+	// A dangling reference (company since deleted) leaves the name empty - the
+	// id survives so the render can fall back to it, and nothing errors.
+	orphan := &protocol.Contact{Name: "Orphan", CompanyID: "co_does_not_exist"}
+	if err := st.CreateContact(ws, orphan); err != nil {
+		t.Fatalf("create orphan: %v", err)
+	}
+	if orphan.CompanyName != "" {
+		t.Fatalf("unresolved reference should leave company name empty, got %q", orphan.CompanyName)
+	}
+}
+
 func TestDealFilters(t *testing.T) {
 	st := newTestStore(t)
 	user, _ := st.GetOrCreateIdentity("a@b.com")

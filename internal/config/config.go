@@ -136,10 +136,10 @@ type PlanLimits struct {
 // bounding runaway/abusive growth.
 func defaultBasicLimits() PlanLimits {
 	return PlanLimits{
-		MaxWorkspaces: 3,
-		MaxMembers:    5,
+		MaxWorkspaces: 1,
+		MaxMembers:    1,
 		MaxContacts:   1000,
-		MaxCompanies:  500,
+		MaxCompanies:  1000,
 		MaxDeals:      1000,
 	}
 }

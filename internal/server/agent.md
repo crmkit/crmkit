@@ -89,6 +89,12 @@ them to operate crmkit.
   confirm with the user, then repeat with ?confirm=<token>.
 - Errors are instructive: they include a hint telling you what to do next.
 - Money is integer cents (amount_cents) plus a currency code.
+- Times in reads are compact RFC3339 with the workspace's offset, e.g.
+  2026-06-10T09:00-07:00 (or ...Z for UTC). Instants are stored in UTC; the
+  workspace timezone (default UTC) only controls formatting. Set it with
+  PATCH /workspaces/{id} {"timezone":"America/Los_Angeles"} (an IANA name). When
+  you write a time (follow_up_at), include the offset so it lands on the instant
+  the user means.
 - POST /contacts and /companies UPSERT: if you include an email (contacts) or
   domain (companies) that already exists, the existing record is updated (merge
   of the fields you send) instead of creating a duplicate. The response says
@@ -101,8 +107,9 @@ Your token operates inside ONE workspace (the one it was minted for). CRM data
 endpoints below always act on that workspace. To work in a different workspace
 you belong to, mint a token for it and send that token instead:
 
-GET /workspaces list workspaces you belong to (with your role)
+GET /workspaces list workspaces you belong to (with your role + timezone)
 POST /workspaces create one {"name":"My Team"}
+PATCH /workspaces/{id} set the display timezone {"timezone":"America/Los_Angeles"} (admin only)
 POST /workspaces/{id}/tokens mint a token scoped to that workspace ("switch")
 GET /workspaces/{id}/members members + pending invites
 POST /workspaces/{id}/invites add someone {"email":"x@acme.com","role":"member"} (admin only)
@@ -139,11 +146,23 @@ Filter by any allowed field as field=[op:]value ; repeated params are AND-ed:
 ?follow_up_at=is:null is:null / not:null check empty / non-empty
 \*\_at fields accept RFC3339, e.g. created_at=gte:2026-01-01T00:00:00Z
 Fuzzy search across key fields: ?search=acme
+Filter by creator: ?created_by=agent@x.com - every record is stamped with the
+member (human or agent) that created it; filter to organise records by who made
+them.
 Sort: ?sort=field or ?sort=-field (the - means descending).
 Paginate: ?limit=N (default 50, max 200). When more rows remain, the response
 ends with a line # next: <cursor> (JSON: "next_cursor"); fetch the next page
 with ?cursor=<cursor> and keep the other params unchanged.
 Unknown field/operator/value -> 400 listing what is allowed.
+
+## SEARCH (find anything in one call)
+
+GET /search?q=acme runs the fuzzy search across contacts, companies AND deals at
+once and returns grouped results (sections "# contacts / # companies / # deals").
+Use it when you do not yet know which type a name belongs to. Scope it with
+?types=contacts,deals (default: all three). It returns up to a handful per type;
+when a type is truncated the response says so - switch to that type's endpoint
+(e.g. GET /contacts?search=acme) for the full, paginated list.
 
 ## ENDPOINTS
 
@@ -151,12 +170,13 @@ GET /help this manual
 GET /healthz liveness probe (no auth)
 GET /readyz readiness probe - checks the database (no auth)
 GET /whoami identity + current workspace behind the token
+GET /search?q=&types= find anything across contacts, companies & deals (grouped; see SEARCH)
 GET /tokens list your active tokens (sessions)
 DELETE /tokens/{id} revoke one of your tokens (log out a session)
 
 GET /contacts?<filters>&search=&sort=&limit=&cursor= list/query contacts (see QUERY)
 POST /contacts create OR update by email (upsert) {"name":...,"email":...,"company_id":...,"stage":...,"tags":[...],"custom":{...}}
-GET /contacts/{id} fetch one contact
+GET /contacts/{id} fetch one contact (includes created_by + an activity summary: activities=N, last_activity)
 PATCH /contacts/{id} update fields
 DELETE /contacts/{id}?confirm= delete (two-step)
 GET /contacts/{id}/activities activity log for a contact
@@ -170,13 +190,13 @@ DELETE /companies/{id}?confirm= delete (two-step)
 
 GET /deals?<filters>&search=&sort=&limit=&cursor= list/query deals (see QUERY)
 POST /deals create {"title":...,"amount_cents":...,"currency":"USD","stage":...,"contact_id":...,"company_id":...}
-GET /deals/{id} fetch one deal
+GET /deals/{id} fetch one deal (includes created_by + an activity summary: activities=N, last_activity)
 PATCH /deals/{id} update (e.g. {"stage":"won","status":"won"})
 DELETE /deals/{id}?confirm= delete (two-step)
 
 GET /reminders?days=&limit= due/overdue follow-ups (contacts + deals due now; ?days=N looks ahead)
-GET /activities?contact=&deal=&limit= recent activities
-GET /audit?limit= workspace audit log
+GET /activities?contact=&deal=&limit= recent activities (each shows by= who logged it)
+GET /audit?by=&limit= workspace audit log - who did what; by=email filters to one member (human or agent)
 
 ## REMINDERS (pull, not push)
 

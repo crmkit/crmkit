@@ -34,6 +34,7 @@ type mcpTool struct {
 // calling token's workspace.
 var allowedPrefixes = []string{
 	"/whoami",
+	"/search",
 	"/contacts",
 	"/companies",
 	"/deals",
@@ -53,6 +54,7 @@ Responses are grepable text (one labeled line per record) unless you add ?format
 
 Core:
   GET  /whoami                     identity, plan, usage
+  GET  /search?q=acme              find anything across contacts, companies & deals (grouped)
   GET  /contacts|/companies|/deals list/query (see filters below)
   POST /contacts|/companies|/deals create; POST upserts contacts by email, companies by domain
   GET|PATCH|DELETE /contacts/{id}  fetch / update / delete one (same for companies, deals)

@@ -96,12 +96,16 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	// by the caller's identity, not the token's workspace).
 	mux.HandleFunc("GET /workspaces", s.authed(s.handleListWorkspaces))
 	mux.HandleFunc("POST /workspaces", s.authed(s.handleCreateWorkspace))
+	mux.HandleFunc("PATCH /workspaces/{id}", s.authed(s.handleUpdateWorkspace))
 	mux.HandleFunc("POST /workspaces/{id}/tokens", s.authed(s.handleMintWorkspaceToken))
 	mux.HandleFunc("GET /workspaces/{id}/members", s.authed(s.handleListMembers))
 	mux.HandleFunc("POST /workspaces/{id}/invites", s.authed(s.handleInvite))
 	mux.HandleFunc("POST /workspaces/{id}/members/{userId}/role", s.authed(s.handleSetMemberRole))
 	mux.HandleFunc("DELETE /workspaces/{id}/members/{userId}", s.authed(s.handleRemoveMember))
 	mux.HandleFunc("DELETE /workspaces/{id}", s.authed(s.handleDeleteWorkspace))
+
+	// Cross-entity search ("find anything" across contacts, companies, deals).
+	mux.HandleFunc("GET /search", s.authed(s.handleSearch))
 
 	// Contacts.
 	mux.HandleFunc("GET /contacts", s.authed(s.handleListContacts))
@@ -347,7 +351,7 @@ func decodeJSON(r *http.Request, dst any) error {
 
 // audit records an action, logging (but not failing) on error.
 func (s *Server) audit(sess protocol.Session, action, target, detail string) {
-	if err := s.store.WriteAudit(sess.WorkspaceID, sess.TokenID, action, target, detail); err != nil {
+	if err := s.store.WriteAudit(sess.WorkspaceID, sess.TokenID, sess.Email, action, target, detail); err != nil {
 		s.log.Warn("audit write failed", slog.String("error", err.Error()))
 	}
 }

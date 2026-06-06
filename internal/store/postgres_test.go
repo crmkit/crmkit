@@ -126,7 +126,7 @@ func TestPostgresEndToEnd(t *testing.T) {
 	}
 
 	// Cascade delete + audit.
-	_ = st.WriteAudit(team, "tok", "contact.create", "contact/"+c.ID, "Jane Doe")
+	_ = st.WriteAudit(team, "tok", "me@example.com", "contact.create", "contact/"+c.ID, "Jane Doe")
 	if err := st.DeleteWorkspace(team); err != nil {
 		t.Fatalf("delete workspace: %v", err)
 	}

@@ -43,6 +43,14 @@ func newTestServer(t *testing.T) *httptest.Server {
 
 	cfg := config.Default()
 	cfg.Server.Local = true // echo login codes so the test can complete auth
+	// The shared harness exercises behavior (auth, roles, CRUD), not quotas, so
+	// give the default plan unlimited limits - otherwise the basic plan's
+	// max_members=1 blocks role/escalation tests that need a second member. Quota
+	// enforcement is covered separately by quota_test.go (its own low-limit config).
+	if pl, ok := cfg.Plans.Catalogue[cfg.Plans.Default]; ok {
+		pl.MaxWorkspaces, pl.MaxMembers, pl.MaxContacts, pl.MaxCompanies, pl.MaxDeals = -1, -1, -1, -1, -1
+		cfg.Plans.Catalogue[cfg.Plans.Default] = pl
+	}
 	srv := New(cfg, st, memoryRL(t))
 
 	ts := httptest.NewServer(srv.Handler())

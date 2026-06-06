@@ -138,8 +138,8 @@ plans:
       max_workspaces: 1 # per user (how many a user may create)
       max_members: 1 # per workspace (members + pending invites)
       max_contacts: 1000
-      max_companies: 100
-      max_deals: 100
+      max_companies: 1000
+      max_deals: 1000
 
 # MCP: the Model Context Protocol connector at POST /mcp, plus the OAuth 2.1
 # authorization server (dynamic client registration + PKCE) that lets standard

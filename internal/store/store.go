@@ -86,6 +86,7 @@ type Store interface {
 	// workspaces & membership
 	ListWorkspacesForUser(userID string) ([]protocol.Workspace, error)
 	CreateWorkspace(userID, name string) (protocol.Workspace, error)
+	SetWorkspaceTimezone(workspaceID, tz string) error
 	DeleteWorkspace(workspaceID string) error
 	MemberRole(workspaceID, userID string) (string, error)
 	SetMemberRole(workspaceID, userID, role string) error
@@ -123,8 +124,9 @@ type Store interface {
 	// activities & audit
 	CreateActivity(ws string, a *protocol.Activity) error
 	ListActivities(ws, contactID, dealID string, limit int) ([]protocol.Activity, error)
-	WriteAudit(ws, tokenID, action, target, detail string) error
-	ListAudit(ws string, limit int) ([]AuditEntry, error)
+	ActivityStats(ws, contactID, dealID string) (int, time.Time, error)
+	WriteAudit(ws, tokenID, actorEmail, action, target, detail string) error
+	ListAudit(ws, actorEmail string, limit int) ([]AuditEntry, error)
 }
 
 // Compile-time assurance that the SQLite backend satisfies the interface.

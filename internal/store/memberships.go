@@ -16,7 +16,7 @@ var ErrLastAdmin = errors.New("cannot remove the last admin")
 // user's role, newest first.
 func (s *sqlStore) ListWorkspacesForUser(userID string) ([]protocol.Workspace, error) {
 	rows, err := s.query(`
-SELECT w.id, w.name, w.created_by, w.created_at, m.role
+SELECT w.id, w.name, w.created_by, w.created_at, w.timezone, m.role
 FROM memberships m JOIN workspaces w ON w.id = m.workspace_id
 WHERE m.user_id = ? ORDER BY m.created_at DESC`, userID)
 	if err != nil {
@@ -29,12 +29,14 @@ WHERE m.user_id = ? ORDER BY m.created_at DESC`, userID)
 		var (
 			ws        protocol.Workspace
 			createdBy sql.NullString
+			tz        sql.NullString
 			createdAt int64
 		)
-		if err := rows.Scan(&ws.ID, &ws.Name, &createdBy, &createdAt, &ws.Role); err != nil {
+		if err := rows.Scan(&ws.ID, &ws.Name, &createdBy, &createdAt, &tz, &ws.Role); err != nil {
 			return nil, err
 		}
 		ws.CreatedBy = createdBy.String
+		ws.Timezone = tz.String
 		ws.CreatedAt = fromUnix(createdAt)
 		out = append(out, ws)
 	}
@@ -49,6 +51,7 @@ func (s *sqlStore) CreateWorkspace(userID, name string) (protocol.Workspace, err
 		Name:      name,
 		CreatedBy: userID,
 		CreatedAt: now,
+		Timezone:  "UTC", // matches the column default; set via SetWorkspaceTimezone
 		Role:      protocol.RoleAdmin,
 	}
 
@@ -70,6 +73,16 @@ func (s *sqlStore) CreateWorkspace(userID, name string) (protocol.Workspace, err
 		return protocol.Workspace{}, err
 	}
 	return ws, nil
+}
+
+// SetWorkspaceTimezone updates a workspace's display timezone (an IANA name,
+// already validated by the caller). It does not touch any stored instant.
+func (s *sqlStore) SetWorkspaceTimezone(workspaceID, tz string) error {
+	res, err := s.exec(`UPDATE workspaces SET timezone = ? WHERE id = ?`, tz, workspaceID)
+	if err != nil {
+		return err
+	}
+	return affectedOne(res)
 }
 
 // MemberRole returns the user's role in a workspace, or ErrNotFound if the user
