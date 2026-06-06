@@ -144,9 +144,10 @@ mandatory PKCE) restricts which client callbacks may register.
 
 ## Skills
 
-Pre-built **agent skills** — connect, digest, import, backup, inbox-sync — live in
-[crmkit/skills](https://github.com/crmkit/skills). Install the set with one command
-(works across Claude Code, Cursor, and 40+ agents via
+Pre-built **agent skills** - digest, import, backup, inbox-sync - live in
+[crmkit/skills](https://github.com/crmkit/skills), for coding agents with a
+filesystem (on a chat app, use the MCP connector above instead). Install the set
+with one command (works across Claude Code, Cursor, and 40+ agents via
 [`npx skills`](https://github.com/vercel-labs/skills)):
 
 ```bash
@@ -160,8 +161,8 @@ curl -fsSL https://github.com/crmkit/skills/releases/latest/download/crmkit-skil
   && unzip -o /tmp/crmkit-skills.zip -d ~/.claude/skills/
 ```
 
-Either way, run `crmkit-connect` first — it authenticates and loads this server's
-manual; the recipe skills build on it.
+Each recipe needs `CRMKIT_BASE_URL` and a crmkit token (`POST /auth/request` →
+`/auth/verify`), and defers to this server's manual (`GET /help`) for syntax.
 
 ## Development
 
