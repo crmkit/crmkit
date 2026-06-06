@@ -41,6 +41,16 @@ type Store interface {
 	CountWorkspacesForUser(userID string) (int, error)
 	CountResource(workspaceID, kind string) (int, error)
 
+	// aggregate stats (global, unscoped) - e.g. for a public stats endpoint.
+	// The individual global counts, plus Totals() which collects all of them
+	// keyed by resource (users, workspaces, contacts, companies, deals).
+	CountUsers() (int, error)
+	CountWorkspaces() (int, error)
+	CountContacts() (int, error)
+	CountCompanies() (int, error)
+	CountDeals() (int, error)
+	Totals() (map[string]int, error)
+
 	// schema migrations. Open never touches schema; MigrationStatus is the
 	// read-only check the server uses to refuse startup when out of date, and
 	// ApplyMigrations is the single schema-writing entry point (`crmkitd

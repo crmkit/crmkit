@@ -53,6 +53,38 @@ func (s *sqlStore) CountResource(workspaceID, kind string) (int, error) {
 	}
 }
 
+// Global, unscoped aggregate counts for a public stats endpoint. Each is a cheap
+// COUNT(*); the table is code-controlled (no user input), so injection-safe.
+
+func (s *sqlStore) CountUsers() (int, error) { return s.countWhere(`SELECT count(*) FROM users`) }
+func (s *sqlStore) CountWorkspaces() (int, error) {
+	return s.countWhere(`SELECT count(*) FROM workspaces`)
+}
+func (s *sqlStore) CountContacts() (int, error) { return s.countWhere(`SELECT count(*) FROM contacts`) }
+func (s *sqlStore) CountCompanies() (int, error) {
+	return s.countWhere(`SELECT count(*) FROM companies`)
+}
+func (s *sqlStore) CountDeals() (int, error) { return s.countWhere(`SELECT count(*) FROM deals`) }
+
+// Totals collects the individual counts above, keyed by resource name.
+func (s *sqlStore) Totals() (map[string]int, error) {
+	out := make(map[string]int, 5)
+	for key, count := range map[string]func() (int, error){
+		"users":      s.CountUsers,
+		"workspaces": s.CountWorkspaces,
+		"contacts":   s.CountContacts,
+		"companies":  s.CountCompanies,
+		"deals":      s.CountDeals,
+	} {
+		n, err := count()
+		if err != nil {
+			return nil, err
+		}
+		out[key] = n
+	}
+	return out, nil
+}
+
 // countWhere runs a count query and returns the scalar result.
 func (s *sqlStore) countWhere(query string, args ...any) (int, error) {
 	var n int
