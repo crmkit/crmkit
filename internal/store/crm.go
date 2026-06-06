@@ -29,19 +29,29 @@ func (s *sqlStore) CreateContact(ws string, c *protocol.Contact) error {
 		return err
 	}
 	_, err = s.exec(`
-INSERT INTO contacts (id, workspace_id, name, email, phone, company_id, owner, stage, tags, notes, custom, follow_up_at, follow_up_note, created_at, updated_at)
-VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+INSERT INTO contacts (id, workspace_id, name, email, phone, company_id, owner, stage, tags, notes, custom, follow_up_at, follow_up_note, created_at, updated_at, created_by)
+VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		c.ID, ws, c.Name, c.Email, c.Phone, c.CompanyID, c.Owner, c.Stage, tags, c.Notes, custom,
-		nullableUnix(c.FollowUpAt), c.FollowUpNote, unix(now), unix(now))
-	return err
+		nullableUnix(c.FollowUpAt), c.FollowUpNote, unix(now), unix(now), c.CreatedBy)
+	if err != nil {
+		return err
+	}
+	return s.fillContactRef(ws, c)
 }
 
-const contactColumns = `id, name, email, phone, company_id, owner, stage, tags, notes, custom, follow_up_at, follow_up_note, created_at, updated_at`
+const contactColumns = `id, name, email, phone, company_id, owner, stage, tags, notes, custom, follow_up_at, follow_up_note, created_at, updated_at, created_by`
 
 // GetContact loads one contact scoped to the workspace.
 func (s *sqlStore) GetContact(ws, id string) (protocol.Contact, error) {
 	row := s.queryRow(`SELECT `+contactColumns+` FROM contacts WHERE workspace_id = ? AND id = ?`, ws, id)
-	return scanContact(row)
+	c, err := scanContact(row)
+	if err != nil {
+		return protocol.Contact{}, err
+	}
+	if err := s.fillContactRef(ws, &c); err != nil {
+		return protocol.Contact{}, err
+	}
+	return c, nil
 }
 
 // FindContactByEmail returns contacts in a workspace whose email matches
@@ -84,7 +94,10 @@ WHERE workspace_id = ? AND id = ?`,
 	if err != nil {
 		return err
 	}
-	return affectedOne(res)
+	if err := affectedOne(res); err != nil {
+		return err
+	}
+	return s.fillContactRef(ws, c)
 }
 
 // DeleteContact removes a contact from a workspace.
@@ -104,10 +117,11 @@ func scanContact(sc scanner) (protocol.Contact, error) {
 		stage, tags        sql.NullString
 		notes, custom      sql.NullString
 		followNote         sql.NullString
+		createdBy          sql.NullString
 		followAt           sql.NullInt64
 		createdAt, updated int64
 	)
-	err := sc.Scan(&c.ID, &c.Name, &email, &phone, &companyID, &owner, &stage, &tags, &notes, &custom, &followAt, &followNote, &createdAt, &updated)
+	err := sc.Scan(&c.ID, &c.Name, &email, &phone, &companyID, &owner, &stage, &tags, &notes, &custom, &followAt, &followNote, &createdAt, &updated, &createdBy)
 	if errors.Is(err, sql.ErrNoRows) {
 		return protocol.Contact{}, ErrNotFound
 	}
@@ -122,6 +136,7 @@ func scanContact(sc scanner) (protocol.Contact, error) {
 	c.FollowUpAt = fromNullableUnix(followAt)
 	c.FollowUpNote = followNote.String
 	c.CreatedAt, c.UpdatedAt = fromUnix(createdAt), fromUnix(updated)
+	c.CreatedBy = createdBy.String
 	return c, nil
 }
 
@@ -139,12 +154,12 @@ func (s *sqlStore) CreateCompany(ws string, c *protocol.Company) error {
 		return err
 	}
 	_, err = s.exec(`
-INSERT INTO companies (id, workspace_id, name, domain, custom, created_at, updated_at)
-VALUES (?,?,?,?,?,?,?)`, c.ID, ws, c.Name, c.Domain, custom, unix(now), unix(now))
+INSERT INTO companies (id, workspace_id, name, domain, custom, created_at, updated_at, created_by)
+VALUES (?,?,?,?,?,?,?,?)`, c.ID, ws, c.Name, c.Domain, custom, unix(now), unix(now), c.CreatedBy)
 	return err
 }
 
-const companyColumns = `id, name, domain, custom, created_at, updated_at`
+const companyColumns = `id, name, domain, custom, created_at, updated_at, created_by`
 
 // GetCompany loads one company scoped to the workspace.
 func (s *sqlStore) GetCompany(ws, id string) (protocol.Company, error) {
@@ -200,9 +215,10 @@ func scanCompany(sc scanner) (protocol.Company, error) {
 	var (
 		c              protocol.Company
 		domain, custom sql.NullString
+		createdBy      sql.NullString
 		created, upd   int64
 	)
-	err := sc.Scan(&c.ID, &c.Name, &domain, &custom, &created, &upd)
+	err := sc.Scan(&c.ID, &c.Name, &domain, &custom, &created, &upd, &createdBy)
 	if errors.Is(err, sql.ErrNoRows) {
 		return protocol.Company{}, ErrNotFound
 	}
@@ -212,6 +228,7 @@ func scanCompany(sc scanner) (protocol.Company, error) {
 	c.Domain = domain.String
 	c.Custom = unmarshalCustom(custom.String)
 	c.CreatedAt, c.UpdatedAt = fromUnix(created), fromUnix(upd)
+	c.CreatedBy = createdBy.String
 	return c, nil
 }
 
@@ -232,19 +249,29 @@ func (s *sqlStore) CreateDeal(ws string, d *protocol.Deal) error {
 		return err
 	}
 	_, err = s.exec(`
-INSERT INTO deals (id, workspace_id, title, contact_id, company_id, amount_cents, currency, stage, status, custom, follow_up_at, follow_up_note, created_at, updated_at)
-VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+INSERT INTO deals (id, workspace_id, title, contact_id, company_id, amount_cents, currency, stage, status, custom, follow_up_at, follow_up_note, created_at, updated_at, created_by)
+VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		d.ID, ws, d.Title, d.ContactID, d.CompanyID, d.AmountCents, d.Currency, d.Stage, d.Status, custom,
-		nullableUnix(d.FollowUpAt), d.FollowUpNote, unix(now), unix(now))
-	return err
+		nullableUnix(d.FollowUpAt), d.FollowUpNote, unix(now), unix(now), d.CreatedBy)
+	if err != nil {
+		return err
+	}
+	return s.fillDealRef(ws, d)
 }
 
-const dealColumns = `id, title, contact_id, company_id, amount_cents, currency, stage, status, custom, follow_up_at, follow_up_note, created_at, updated_at`
+const dealColumns = `id, title, contact_id, company_id, amount_cents, currency, stage, status, custom, follow_up_at, follow_up_note, created_at, updated_at, created_by`
 
 // GetDeal loads one deal scoped to the workspace.
 func (s *sqlStore) GetDeal(ws, id string) (protocol.Deal, error) {
 	row := s.queryRow(`SELECT `+dealColumns+` FROM deals WHERE workspace_id = ? AND id = ?`, ws, id)
-	return scanDeal(row)
+	d, err := scanDeal(row)
+	if err != nil {
+		return protocol.Deal{}, err
+	}
+	if err := s.fillDealRef(ws, &d); err != nil {
+		return protocol.Deal{}, err
+	}
+	return d, nil
 }
 
 // UpdateDeal overwrites mutable deal fields within a workspace.
@@ -262,7 +289,10 @@ WHERE workspace_id = ? AND id = ?`,
 	if err != nil {
 		return err
 	}
-	return affectedOne(res)
+	if err := affectedOne(res); err != nil {
+		return err
+	}
+	return s.fillDealRef(ws, d)
 }
 
 // DeleteDeal removes a deal from a workspace.
@@ -281,11 +311,12 @@ func scanDeal(sc scanner) (protocol.Deal, error) {
 		currency, stage, status sql.NullString
 		custom                  sql.NullString
 		followNote              sql.NullString
+		createdBy               sql.NullString
 		amount                  sql.NullInt64
 		followAt                sql.NullInt64
 		created, upd            int64
 	)
-	err := sc.Scan(&d.ID, &d.Title, &contactID, &companyID, &amount, &currency, &stage, &status, &custom, &followAt, &followNote, &created, &upd)
+	err := sc.Scan(&d.ID, &d.Title, &contactID, &companyID, &amount, &currency, &stage, &status, &custom, &followAt, &followNote, &created, &upd, &createdBy)
 	if errors.Is(err, sql.ErrNoRows) {
 		return protocol.Deal{}, ErrNotFound
 	}
@@ -299,6 +330,7 @@ func scanDeal(sc scanner) (protocol.Deal, error) {
 	d.FollowUpAt = fromNullableUnix(followAt)
 	d.FollowUpNote = followNote.String
 	d.CreatedAt, d.UpdatedAt = fromUnix(created), fromUnix(upd)
+	d.CreatedBy = createdBy.String
 	return d, nil
 }
 
@@ -438,35 +470,73 @@ func (s *sqlStore) ListActivities(ws, contactID, dealID string, limit int) ([]pr
 	return out, rows.Err()
 }
 
+// ActivityStats returns the activity count and most-recent activity time for a
+// contact or deal (whichever id is non-empty) - used to annotate a single-record
+// fetch. Returns 0 + zero time when there are none.
+func (s *sqlStore) ActivityStats(ws, contactID, dealID string) (int, time.Time, error) {
+	args := []any{ws}
+	sb := strings.Builder{}
+	sb.WriteString(`SELECT count(*), coalesce(max(created_at), 0) FROM activities WHERE workspace_id = ?`)
+	if contactID != "" {
+		sb.WriteString(` AND contact_id = ?`)
+		args = append(args, contactID)
+	}
+	if dealID != "" {
+		sb.WriteString(` AND deal_id = ?`)
+		args = append(args, dealID)
+	}
+	var (
+		count int
+		last  int64
+	)
+	if err := s.queryRow(sb.String(), args...).Scan(&count, &last); err != nil {
+		return 0, time.Time{}, err
+	}
+	if last == 0 {
+		return count, time.Time{}, nil
+	}
+	return count, fromUnix(last), nil
+}
+
 // ---- audit ---------------------------------------------------------------
 
-// WriteAudit appends an audit entry. Failures are non-fatal to callers; they
-// should log and continue.
-func (s *sqlStore) WriteAudit(ws, tokenID, action, target, detail string) error {
+// WriteAudit appends an audit entry attributed to the acting member
+// (actorEmail). Failures are non-fatal to callers; they should log and continue.
+func (s *sqlStore) WriteAudit(ws, tokenID, actorEmail, action, target, detail string) error {
 	_, err := s.exec(`
-INSERT INTO audit_log (id, workspace_id, token_id, action, target, detail, created_at)
-VALUES (?,?,?,?,?,?,?)`, protocol.NewID("aud"), ws, tokenID, action, target, detail, unix(time.Now()))
+INSERT INTO audit_log (id, workspace_id, token_id, actor_email, action, target, detail, created_at)
+VALUES (?,?,?,?,?,?,?,?)`, protocol.NewID("aud"), ws, tokenID, actorEmail, action, target, detail, unix(time.Now()))
 	return err
 }
 
 // AuditEntry is one recorded action.
 type AuditEntry struct {
-	ID        string
-	TokenID   string
-	Action    string
-	Target    string
-	Detail    string
-	CreatedAt time.Time
+	ID         string
+	TokenID    string
+	ActorEmail string
+	Action     string
+	Target     string
+	Detail     string
+	CreatedAt  time.Time
 }
 
-// ListAudit returns recent audit entries for a workspace, newest first.
-func (s *sqlStore) ListAudit(ws string, limit int) ([]AuditEntry, error) {
+// ListAudit returns recent audit entries for a workspace, newest first. When
+// actorEmail is non-empty it returns only that member's actions (case-insensitive).
+func (s *sqlStore) ListAudit(ws, actorEmail string, limit int) ([]AuditEntry, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 50
 	}
-	rows, err := s.query(`
-SELECT id, token_id, action, target, detail, created_at FROM audit_log
-WHERE workspace_id = ? ORDER BY created_at DESC LIMIT ?`, ws, limit)
+	args := []any{ws}
+	sb := strings.Builder{}
+	sb.WriteString(`SELECT id, token_id, actor_email, action, target, detail, created_at FROM audit_log WHERE workspace_id = ?`)
+	if actorEmail != "" {
+		sb.WriteString(` AND lower(actor_email) = lower(?)`)
+		args = append(args, actorEmail)
+	}
+	sb.WriteString(` ORDER BY created_at DESC LIMIT ?`)
+	args = append(args, limit)
+
+	rows, err := s.query(sb.String(), args...)
 	if err != nil {
 		return nil, err
 	}
@@ -475,14 +545,16 @@ WHERE workspace_id = ? ORDER BY created_at DESC LIMIT ?`, ws, limit)
 	out := []AuditEntry{}
 	for rows.Next() {
 		var (
-			e                       AuditEntry
-			tokenID, target, detail sql.NullString
-			created                 int64
+			e              AuditEntry
+			tokenID, actor sql.NullString
+			target, detail sql.NullString
+			created        int64
 		)
-		if err := rows.Scan(&e.ID, &tokenID, &e.Action, &target, &detail, &created); err != nil {
+		if err := rows.Scan(&e.ID, &tokenID, &actor, &e.Action, &target, &detail, &created); err != nil {
 			return nil, err
 		}
-		e.TokenID, e.Target, e.Detail = tokenID.String, target.String, detail.String
+		e.TokenID, e.ActorEmail = tokenID.String, actor.String
+		e.Target, e.Detail = target.String, detail.String
 		e.CreatedAt = fromUnix(created)
 		out = append(out, e)
 	}
@@ -504,5 +576,114 @@ func affectedOne(res interface{ RowsAffected() (int64, error) }) error {
 	if n == 0 {
 		return ErrNotFound
 	}
+	return nil
+}
+
+// ---- relation name resolution (read-time display enrichment) -------------
+
+// namesByID returns id -> name for rows of `table` within the workspace, in a
+// single query (the basis for resolving contact/company references without an
+// N+1). `table` is code-controlled (only "contacts"/"companies" are passed), so
+// the interpolation is injection-safe; the ids are bound parameters.
+func (s *sqlStore) namesByID(ws, table string, ids []string) (map[string]string, error) {
+	ids = distinctNonEmpty(ids)
+	out := make(map[string]string, len(ids))
+	if len(ids) == 0 {
+		return out, nil
+	}
+	ph := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
+	args := make([]any, 0, len(ids)+1)
+	args = append(args, ws)
+	for _, id := range ids {
+		args = append(args, id)
+	}
+	rows, err := s.query("SELECT id, name FROM "+table+" WHERE workspace_id = ? AND id IN ("+ph+")", args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, name string
+		if err := rows.Scan(&id, &name); err != nil {
+			return nil, err
+		}
+		out[id] = name
+	}
+	return out, rows.Err()
+}
+
+func distinctNonEmpty(in []string) []string {
+	seen := make(map[string]struct{}, len(in))
+	out := make([]string, 0, len(in))
+	for _, v := range in {
+		if v == "" {
+			continue
+		}
+		if _, ok := seen[v]; ok {
+			continue
+		}
+		seen[v] = struct{}{}
+		out = append(out, v)
+	}
+	return out
+}
+
+// fillContactRefs resolves each contact's company_id to a company name (one
+// query for the whole page), for display. Unresolved ids leave CompanyName empty
+// (the render falls back to the id).
+func (s *sqlStore) fillContactRefs(ws string, contacts []protocol.Contact) error {
+	ids := make([]string, 0, len(contacts))
+	for _, c := range contacts {
+		ids = append(ids, c.CompanyID)
+	}
+	names, err := s.namesByID(ws, "companies", ids)
+	if err != nil {
+		return err
+	}
+	for i := range contacts {
+		contacts[i].CompanyName = names[contacts[i].CompanyID]
+	}
+	return nil
+}
+
+func (s *sqlStore) fillContactRef(ws string, c *protocol.Contact) error {
+	one := []protocol.Contact{*c}
+	if err := s.fillContactRefs(ws, one); err != nil {
+		return err
+	}
+	*c = one[0]
+	return nil
+}
+
+// fillDealRefs resolves each deal's contact_id and company_id to names (two
+// queries for the whole page), for display.
+func (s *sqlStore) fillDealRefs(ws string, deals []protocol.Deal) error {
+	contactIDs := make([]string, 0, len(deals))
+	companyIDs := make([]string, 0, len(deals))
+	for _, d := range deals {
+		contactIDs = append(contactIDs, d.ContactID)
+		companyIDs = append(companyIDs, d.CompanyID)
+	}
+	contactNames, err := s.namesByID(ws, "contacts", contactIDs)
+	if err != nil {
+		return err
+	}
+	companyNames, err := s.namesByID(ws, "companies", companyIDs)
+	if err != nil {
+		return err
+	}
+	for i := range deals {
+		deals[i].ContactName = contactNames[deals[i].ContactID]
+		deals[i].CompanyName = companyNames[deals[i].CompanyID]
+	}
+	return nil
+}
+
+func (s *sqlStore) fillDealRef(ws string, d *protocol.Deal) error {
+	one := []protocol.Deal{*d}
+	if err := s.fillDealRefs(ws, one); err != nil {
+		return err
+	}
+	*d = one[0]
 	return nil
 }

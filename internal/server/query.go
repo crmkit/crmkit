@@ -203,6 +203,7 @@ var contactQuery = queryConfig{
 	filter: map[string]colSpec{
 		"name": {"name", colText}, "email": {"email", colText}, "phone": {"phone", colText},
 		"company_id": {"company_id", colText}, "owner": {"owner", colText}, "stage": {"stage", colText},
+		"created_by": {"created_by", colText},
 		"created_at": {"created_at", colTime}, "updated_at": {"updated_at", colTime}, "follow_up_at": {"follow_up_at", colTime},
 	},
 	sortBy: map[string]colSpec{
@@ -215,6 +216,7 @@ var contactQuery = queryConfig{
 var companyQuery = queryConfig{
 	filter: map[string]colSpec{
 		"name": {"name", colText}, "domain": {"domain", colText},
+		"created_by": {"created_by", colText},
 		"created_at": {"created_at", colTime}, "updated_at": {"updated_at", colTime},
 	},
 	sortBy: map[string]colSpec{
@@ -228,8 +230,8 @@ var dealQuery = queryConfig{
 	filter: map[string]colSpec{
 		"title": {"title", colText}, "stage": {"stage", colText}, "status": {"status", colText},
 		"contact_id": {"contact_id", colText}, "company_id": {"company_id", colText}, "currency": {"currency", colText},
-		"amount_cents": {"amount_cents", colInt},
-		"created_at":   {"created_at", colTime}, "updated_at": {"updated_at", colTime}, "follow_up_at": {"follow_up_at", colTime},
+		"amount_cents": {"amount_cents", colInt}, "created_by": {"created_by", colText},
+		"created_at": {"created_at", colTime}, "updated_at": {"updated_at", colTime}, "follow_up_at": {"follow_up_at", colTime},
 	},
 	sortBy: map[string]colSpec{
 		"created_at": {"created_at", colTime}, "updated_at": {"updated_at", colTime},

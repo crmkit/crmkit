@@ -126,6 +126,14 @@ func (a *App) Config() Config { return a.cfg }
 // request logging and rate limiting applied to all routes.
 func (a *App) Handler() http.Handler { return a.srv.Middleware(a.mux) }
 
+// RouteHandler returns the bare route mux WITHOUT the outer middleware (request
+// logging, rate limiting). It is for in-process dispatch: an extension that
+// wants to invoke crmkit's own endpoints internally (e.g. an MCP tool that
+// replays a synthesized request) should target this, so a single external call
+// is not rate-limited or logged twice. Per-route auth (Authed) still applies, so
+// the synthesized request must carry its own Authorization header.
+func (a *App) RouteHandler() http.Handler { return a.mux }
+
 // Close releases App-owned resources (the rate-limit provider). The store is
 // owned by the caller (close it separately).
 func (a *App) Close() error { return a.rl.Close() }

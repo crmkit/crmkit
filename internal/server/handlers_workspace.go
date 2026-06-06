@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/crmkit/crmkit/internal/auth"
 	"github.com/crmkit/crmkit/internal/protocol"
@@ -43,6 +44,7 @@ func (s *Server) handleListWorkspaces(w http.ResponseWriter, r *http.Request) {
 		s.serverErr(w, r)
 		return
 	}
+	list = localizedSlice(list, locationOf(sess))
 	render.Respond(w, r, http.StatusOK, list, render.Workspaces(list))
 }
 
@@ -72,8 +74,48 @@ func (s *Server) handleCreateWorkspace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.audit(sess, "workspace.create", "workspace/"+ws.ID, name)
+	ws = ws.Localized(locationOf(sess))
 	text := render.WorkspaceLine(ws) + "\n# created. Mint a token to act in it: POST /workspaces/" + ws.ID + "/tokens"
 	render.Respond(w, r, http.StatusCreated, ws, text)
+}
+
+// handleUpdateWorkspace updates a workspace setting - currently its display
+// timezone (admin only). Instants stay UTC; this only changes how reads format.
+func (s *Server) handleUpdateWorkspace(w http.ResponseWriter, r *http.Request) {
+	sess := sessionFrom(r)
+	workspaceID := r.PathValue("id")
+	if _, ok := s.requireRole(w, r, workspaceID, true); !ok {
+		return
+	}
+	var body struct {
+		Timezone string `json:"timezone"`
+	}
+	if err := decodeJSON(r, &body); err != nil {
+		render.Error(w, r, http.StatusBadRequest, "bad_request", `Send JSON, e.g. {"timezone":"America/Los_Angeles"}.`)
+		return
+	}
+	tz := strings.TrimSpace(body.Timezone)
+	if tz == "" {
+		render.Error(w, r, http.StatusBadRequest, "missing_field",
+			`"timezone" is required - an IANA name like "America/New_York", "Europe/London", or "UTC".`)
+		return
+	}
+	if _, err := time.LoadLocation(tz); err != nil {
+		render.Error(w, r, http.StatusBadRequest, "invalid_timezone",
+			"Unknown timezone "+tz+`. Use an IANA name like "America/New_York", "Europe/London", or "UTC".`)
+		return
+	}
+	if err := s.store.SetWorkspaceTimezone(workspaceID, tz); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			s.notFound(w, r, "workspace")
+			return
+		}
+		s.serverErr(w, r)
+		return
+	}
+	s.audit(sess, "workspace.timezone", "workspace/"+workspaceID, tz)
+	render.Respond(w, r, http.StatusOK, map[string]string{"id": workspaceID, "timezone": tz},
+		"OK workspace/"+workspaceID+" timezone="+tz+"\n# times in reads now render in "+tz)
 }
 
 type mintTokenBody struct {
@@ -141,6 +183,7 @@ func (s *Server) handleListMembers(w http.ResponseWriter, r *http.Request) {
 		s.serverErr(w, r)
 		return
 	}
+	members = localizedSlice(members, locationOf(sessionFrom(r)))
 	resp := map[string]any{"members": members, "invites": invites}
 	render.Respond(w, r, http.StatusOK, resp, render.Members(members, invites))
 }

@@ -25,15 +25,16 @@ type Migration struct {
 // schema; it only reads MigrationStatus and refuses to start if anything is
 // pending (run `crmkit migrate --execute`).
 var migrations = []Migration{
+	// v1 (2026-06-05): baseline - the full schema as of the first release.
 	{Version: 1, Name: "initial schema", Statements: baselineSchema},
-	// v2: per-tenant plan assignment. 'basic' matches config.DefaultPlan; the
+	// v2 (2026-06-05): per-tenant plan assignment. 'basic' matches config.DefaultPlan; the
 	// app sets the plan explicitly on insert, this default just backfills any
 	// existing rows. ADD COLUMN with a constant default works on both backends.
 	{Version: 2, Name: "plan columns", Statements: []string{
 		`ALTER TABLE workspaces ADD COLUMN plan TEXT NOT NULL DEFAULT 'basic'`,
 		`ALTER TABLE users ADD COLUMN plan TEXT NOT NULL DEFAULT 'basic'`,
 	}},
-	// v3: MCP OAuth 2.1 authorization server. oauth_clients holds dynamically
+	// v3 (2026-06-05): MCP OAuth 2.1 authorization server. oauth_clients holds dynamically
 	// registered MCP clients (RFC 7591); oauth_codes holds single-use, short-TTL
 	// authorization codes (the PKCE code_challenge is stored, never the verifier).
 	// Both are minted/consumed by the /oauth/* handlers; the access token they
@@ -69,6 +70,30 @@ var migrations = []Migration{
 	expires_at        BIGINT NOT NULL,
 	created_at        BIGINT NOT NULL
 )`,
+	}},
+	// v4 (2026-06-06): attribute audit entries to the acting member. token_id alone is opaque
+	// and dangles when a token is revoked; actor_email is the member's identity at
+	// the time of the action (point-in-time, denormalized, durable). Existing rows
+	// keep a NULL actor_email and render with no `by=`.
+	{Version: 4, Name: "audit actor", Statements: []string{
+		`ALTER TABLE audit_log ADD COLUMN actor_email TEXT`,
+	}},
+	// v5 (2026-06-06): durable per-record provenance. created_by is the member
+	// (human or agent) who created the row, stamped once at insert and never
+	// changed - the audit feed is bounded/recent, so the record itself is the
+	// permanent home for "who made this". Filterable, to organise records by the
+	// agent that created them. Existing rows keep a NULL created_by.
+	{Version: 5, Name: "record creator", Statements: []string{
+		`ALTER TABLE contacts ADD COLUMN created_by TEXT`,
+		`ALTER TABLE companies ADD COLUMN created_by TEXT`,
+		`ALTER TABLE deals ADD COLUMN created_by TEXT`,
+	}},
+	// v6 (2026-06-06): per-workspace display timezone. Instants are still stored
+	// in UTC (unix seconds); this only controls how reads are formatted for
+	// humans. An IANA name like 'America/Los_Angeles'; defaults to (and backfills
+	// as) 'UTC'.
+	{Version: 6, Name: "workspace timezone", Statements: []string{
+		`ALTER TABLE workspaces ADD COLUMN timezone TEXT NOT NULL DEFAULT 'UTC'`,
 	}},
 }
 

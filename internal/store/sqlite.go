@@ -468,16 +468,20 @@ func (s *sqlStore) ResolveToken(tokenHash string) (protocol.Session, error) {
 		revoked   sql.NullInt64
 		createdAt int64
 		lastUsed  sql.NullInt64
+		tz        sql.NullString
 	)
 	// The membership join means a token stops resolving the moment its user is
 	// removed from the workspace - revocation without touching the token rows.
+	// The workspaces join carries the display timezone onto the session so reads
+	// can format times without another lookup.
 	err := s.queryRow(`
-SELECT t.id, t.name, t.user_id, t.workspace_id, u.email, t.revoked_at, t.created_at, t.last_used_at
+SELECT t.id, t.name, t.user_id, t.workspace_id, u.email, t.revoked_at, t.created_at, t.last_used_at, w.timezone
 FROM tokens t
 JOIN users u ON u.id = t.user_id
 JOIN memberships m ON m.user_id = t.user_id AND m.workspace_id = t.workspace_id
+JOIN workspaces w ON w.id = t.workspace_id
 WHERE t.token_hash = ?`, tokenHash).
-		Scan(&sess.TokenID, &sess.TokenName, &sess.UserID, &sess.WorkspaceID, &sess.Email, &revoked, &createdAt, &lastUsed)
+		Scan(&sess.TokenID, &sess.TokenName, &sess.UserID, &sess.WorkspaceID, &sess.Email, &revoked, &createdAt, &lastUsed, &tz)
 	if errors.Is(err, sql.ErrNoRows) {
 		return protocol.Session{}, ErrNotFound
 	}
@@ -499,6 +503,8 @@ WHERE t.token_hash = ?`, tokenHash).
 			return protocol.Session{}, ErrTokenExpired
 		}
 	}
+
+	sess.WorkspaceTimezone = tz.String
 
 	_, _ = s.exec(`UPDATE tokens SET last_used_at = ? WHERE id = ?`, unix(time.Now()), sess.TokenID)
 	return sess, nil
