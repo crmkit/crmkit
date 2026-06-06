@@ -26,18 +26,20 @@ each line stands alone.
 
 ## CONNECTING (pick your client)
 
-How a user connects crmkit to their agent depends on the agent:
+How to reach crmkit depends on the client:
 
-- **Chat apps - ChatGPT, Claude.ai:** add crmkit as an MCP connector; there is
-  nothing to install. URL: `<base_url>/mcp`
-  - ChatGPT: add a custom / developer-mode connector pointing at that URL.
-  - Claude.ai: Settings -> Connectors -> Add custom connector -> that URL
-    (confirm the domain when prompted).
-- **Coding agents - Claude Code, Codex, Cursor:** add the same MCP server, or
-  install the recipe skills (which need a filesystem): `npx skills add crmkit/skills`
+- **Standard chat apps - ChatGPT and Claude.ai:** crmkit runs an MCP connector at
+  `<base_url>/mcp` - add it as a custom connector.
+  - **ChatGPT:** the MCP connector is the only way in - add it and you're set.
+  - **Claude.ai:** use the MCP connector, or call this HTTP API directly if you
+    whitelist the domain `<base_url>` for the conversation.
+- **Coding agents - Claude Code, Codex, Cursor:** just follow this manual and
+  drive the HTTP API directly. Packaged recipe skills are also available:
+  `npx skills add crmkit/skills`.
+- **OpenClaw (and similar):** follow this manual the same way; its skills install
+  with `npx clawhub@latest install crmkit`.
 
-Both paths drive the same plain-text HTTP API described below - the MCP connector
-is detailed next, the skills under SKILLS further down.
+All paths drive the same plain-text HTTP API described below.
 
 ## MCP CONNECTOR
 
