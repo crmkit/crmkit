@@ -15,6 +15,7 @@ import (
 	"github.com/crmkit/crmkit/internal/config"
 	"github.com/crmkit/crmkit/internal/protocol"
 	"github.com/crmkit/crmkit/internal/ratelimit"
+	"github.com/crmkit/crmkit/internal/render"
 	"github.com/crmkit/crmkit/internal/server"
 	"github.com/crmkit/crmkit/internal/store"
 	"github.com/crmkit/crmkit/internal/version"
@@ -34,6 +35,23 @@ type (
 
 // CoreVersion reports the build version of the linked crmkit core.
 func CoreVersion() string { return version.Version }
+
+// Respond writes a response in the negotiated format, exactly like the built-in
+// endpoints: jsonObj when the client asks for JSON (Accept: application/json or
+// ?format=json), otherwise the plain-text body. Use it from extension routes so
+// they format like first-class crmkit routes (plain text by default).
+func Respond(w http.ResponseWriter, r *http.Request, status int, jsonObj any, text string) {
+	render.Respond(w, r, status, jsonObj, text)
+}
+
+// Error writes an instructive error in the negotiated format (JSON {error,hint}
+// or plain text), matching the built-in endpoints.
+func Error(w http.ResponseWriter, r *http.Request, status int, code, hint string) {
+	render.Error(w, r, status, code, hint)
+}
+
+// WantJSON reports whether the client negotiated a JSON response.
+func WantJSON(r *http.Request) bool { return render.WantJSON(r) }
 
 // Load reads configuration, layering defaults < file < env. A missing default
 // file is fine (env vars alone can configure the server).
