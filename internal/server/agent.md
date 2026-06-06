@@ -9,54 +9,78 @@ authentication:
   description: Email one-time-password - request a code, verify it, then send the returned token as a bearer credential on every request.
 ---
 
-crmkit - Agent Operating Manual
-===============================
+# crmkit - Agent Operating Manual
 
 You are talking to crmkit, an agent-first CRM built for you to operate. It is
 headless - there is no UI; you (the agent) are the interface. Drive it with
 plain HTTP requests using your fetch/HTTP tool.
 
 BASE_URL: <base_url>
-AUTH:     send the header  Authorization: Bearer <token>  on every request.
-FORMAT:   responses are plain text by default (one labeled line per record).
-          Add the header  Accept: application/json  (or ?format=json) for JSON.
+AUTH: send the header Authorization: Bearer <token> on every request.
+FORMAT: responses are plain text by default (one labeled line per record).
+Add the header Accept: application/json (or ?format=json) for JSON.
 
-Records are addressed by a stable handle like  contact/c_ab12...  - reuse that
+Records are addressed by a stable handle like contact/c_ab12... - reuse that
 handle (or the bare id after the slash) in later calls. You can grep responses:
 each line stands alone.
 
-MCP CONNECTOR (chat clients)
-----------------------------
+## CONNECTING (pick your client)
+
+How a user connects crmkit to their agent depends on the agent:
+
+- **Chat apps - ChatGPT, Claude.ai:** add crmkit as an MCP connector; there is
+  nothing to install. URL: `<base_url>/mcp`
+  - ChatGPT: add a custom / developer-mode connector pointing at that URL.
+  - Claude.ai: Settings -> Connectors -> Add custom connector -> that URL
+    (confirm the domain when prompted).
+- **Coding agents - Claude Code, Codex, Cursor:** add the same MCP server, or
+  install the recipe skills (which need a filesystem): `npx skills add crmkit/skills`
+
+Both paths drive the same plain-text HTTP API described below - the MCP connector
+is detailed next, the skills under SKILLS further down.
+
+## MCP CONNECTOR
+
 Besides this plain HTTP API, crmkit is also a Model Context Protocol server at
-POST <base_url>/mcp, so you can add it as a connector in clients like ChatGPT and
-Claude. Point the client at <base_url>/mcp and it will walk the standard OAuth
-flow automatically: it registers itself (dynamic client registration), opens a
-crmkit sign-in page where the user enters their email and pastes the emailed
-code, then receives a token. Over MCP, crmkit exposes a single generic tool,
-`request`, that calls this same HTTP API (method + path + optional body) and
-returns the same plain text shown below - so everything in this manual is
+POST <base_url>/mcp, so you can add it as a connector in clients like ChatGPT
+and Claude. Point the client at <base_url>/mcp and it will walk the standard
+OAuth flow automatically: it registers itself (dynamic client registration),
+opens a crmkit sign-in page where the user enters their email and pastes the
+emailed code, then receives a token. Over MCP, crmkit exposes a single generic
+tool, `request`, that calls this same HTTP API (method + path + optional body)
+and returns the same plain text shown below - so everything in this manual is
 reachable from the connector. The token a connector receives is an ordinary
 crmkit token - it appears in GET /tokens and can be revoked there like any
 other session.
 
-FIRST-TIME AUTH
----------------
-1. POST /auth/request   {"email":"you@example.com"}
-     -> a 6-digit login code is emailed to that address.
+## SKILLS (pre-built agent recipes)
+
+Reusable skills that package common crmkit workflows live at
+github.com/crmkit/skills. If your runtime supports agent skills (coding agents
+like Claude Code, Codex, and Cursor - chat apps use the MCP connector above),
+install them with one command: `npx skills add crmkit/skills`. They cover daily digests, CSV
+imports, full backups, and turning emails into logged activities - conveniences,
+since everything they do is just the plain HTTP calls below, so you never need
+them to operate crmkit.
+
+## FIRST-TIME AUTH
+
+1. POST /auth/request {"email":"you@example.com"}
+   -> a 6-digit login code is emailed to that address.
 2. Ask the user for the code.
-3. POST /auth/verify    {"email":"you@example.com","code":"123456","token_name":"<who you are>"}
-     -> returns a token. SAVE IT. Send it as Authorization: Bearer <token> from
-        now on. If you can persist it in memory, do so; otherwise ask the user
-        to keep it for next session.
+3. POST /auth/verify {"email":"you@example.com","code":"123456","token_name":"<who you are>"}
+   -> returns a token. SAVE IT. Send it as Authorization: Bearer <token> from
+   now on. If you can persist it in memory, do so; otherwise ask the user
+   to keep it for next session.
    Set "token_name" to label this session - e.g. your client ("ChatGPT",
    "Claude", "Cursor") or its purpose. It appears in GET /tokens so the user can
    recognize and revoke sessions. Optional; defaults to "default".
-On any 401 (auth_required / invalid_token / token_expired), repeat this flow.
-Tokens are long-lived but expire after a period of inactivity (each use renews
-them), so a token in regular use keeps working; an idle one eventually dies.
+   On any 401 (auth_required / invalid_token / token_expired), repeat this flow.
+   Tokens are long-lived but expire after a period of inactivity (each use renews
+   them), so a token in regular use keeps working; an idle one eventually dies.
 
-CONVENTIONS
------------
+## CONVENTIONS
+
 - All request bodies are JSON. Only send fields you want to set/change.
 - PATCH performs a partial update: omitted fields are preserved.
 - DELETE is gated: the first call returns confirmation_required with a token;
@@ -69,106 +93,108 @@ CONVENTIONS
   "# created" or "# updated". To update a specific record you already hold a
   handle for, use PATCH /contacts/{id}.
 
-WORKSPACES & TEAMS
-------------------
+## WORKSPACES & TEAMS
+
 Your token operates inside ONE workspace (the one it was minted for). CRM data
 endpoints below always act on that workspace. To work in a different workspace
 you belong to, mint a token for it and send that token instead:
 
-GET    /workspaces                  list workspaces you belong to (with your role)
-POST   /workspaces                  create one  {"name":"My Team"}
-POST   /workspaces/{id}/tokens      mint a token scoped to that workspace ("switch")
-GET    /workspaces/{id}/members     members + pending invites
-POST   /workspaces/{id}/invites     add someone  {"email":"x@acme.com","role":"member"} (admin only)
-POST   /workspaces/{id}/members/{userId}/role   change role {"role":"admin"|"member"} (admin only)
-DELETE /workspaces/{id}/members/{userId}   remove a member (admin only)
-DELETE /workspaces/{id}               delete the workspace + all its data (admin only)
+GET /workspaces list workspaces you belong to (with your role)
+POST /workspaces create one {"name":"My Team"}
+POST /workspaces/{id}/tokens mint a token scoped to that workspace ("switch")
+GET /workspaces/{id}/members members + pending invites
+POST /workspaces/{id}/invites add someone {"email":"x@acme.com","role":"member"} (admin only)
+POST /workspaces/{id}/members/{userId}/role change role {"role":"admin"|"member"} (admin only)
+DELETE /workspaces/{id}/members/{userId} remove a member (admin only)
+DELETE /workspaces/{id} delete the workspace + all its data (admin only)
 
 Roles are "admin" and "member". Admins manage membership; members operate the
 CRM. Invites are by email: the invited person is emailed sign-in instructions
 and joins automatically the next time they authenticate. Switching workspace
 means switching which token you send - the CRM URLs below never change.
 
-PLANS & LIMITS
---------------
+## PLANS & LIMITS
+
 Each workspace/user has a plan with caps on how many objects you can create
 (contacts, companies, deals, members, workspaces). Creating past a cap returns
 "plan_limit_reached" (HTTP 403) - don't retry; tell the user the limit is hit.
 GET /whoami shows the current plan and usage (e.g. "contacts: 12 / 1000"), so
 check there to know the ceilings before bulk-creating.
 
-STEP-UP (sensitive actions)
----------------------------
+## STEP-UP (sensitive actions)
+
 Promoting a member to admin and deleting a workspace require an email
 confirmation. Call the endpoint once: it returns "escalation_required" and emails
 a code to your address. Ask the user for the code, then repeat the SAME request
 with ?code=<code> (or header X-Escalation-Code: <code>).
 
-QUERY (the list endpoints: /contacts, /companies, /deals)
----------------------------------------------------------
-Filter by any allowed field as  field=[op:]value ; repeated params are AND-ed:
-  ?stage=lead                  (eq is the default operator)
-  ?amount_cents=gte:100000     ops: eq ne gt gte lt lte like in is not
-  ?stage=in:lead,qualified     in: takes a comma-separated list
-  ?follow_up_at=is:null        is:null / not:null check empty / non-empty
-  *_at fields accept RFC3339, e.g. created_at=gte:2026-01-01T00:00:00Z
-Fuzzy search across key fields:  ?search=acme
-Sort:  ?sort=field  or  ?sort=-field  (the - means descending).
-Paginate:  ?limit=N  (default 50, max 200). When more rows remain, the response
-ends with a line  # next: <cursor>  (JSON: "next_cursor"); fetch the next page
+## QUERY (the list endpoints: /contacts, /companies, /deals)
+
+Filter by any allowed field as field=[op:]value ; repeated params are AND-ed:
+?stage=lead (eq is the default operator)
+?amount_cents=gte:100000 ops: eq ne gt gte lt lte like in is not
+?stage=in:lead,qualified in: takes a comma-separated list
+?follow_up_at=is:null is:null / not:null check empty / non-empty
+\*\_at fields accept RFC3339, e.g. created_at=gte:2026-01-01T00:00:00Z
+Fuzzy search across key fields: ?search=acme
+Sort: ?sort=field or ?sort=-field (the - means descending).
+Paginate: ?limit=N (default 50, max 200). When more rows remain, the response
+ends with a line # next: <cursor> (JSON: "next_cursor"); fetch the next page
 with ?cursor=<cursor> and keep the other params unchanged.
 Unknown field/operator/value -> 400 listing what is allowed.
 
-ENDPOINTS
----------
-GET    /help                        this manual
-GET    /healthz                     liveness probe (no auth)
-GET    /readyz                      readiness probe - checks the database (no auth)
-GET    /whoami                      identity + current workspace behind the token
-GET    /tokens                      list your active tokens (sessions)
-DELETE /tokens/{id}                 revoke one of your tokens (log out a session)
+## ENDPOINTS
 
-GET    /contacts?<filters>&search=&sort=&limit=&cursor=   list/query contacts (see QUERY)
-POST   /contacts                    create OR update by email (upsert)  {"name":...,"email":...,"company_id":...,"stage":...,"tags":[...],"custom":{...}}
-GET    /contacts/{id}               fetch one contact
-PATCH  /contacts/{id}               update fields
-DELETE /contacts/{id}?confirm=      delete (two-step)
-GET    /contacts/{id}/activities    activity log for a contact
-POST   /contacts/{id}/activities    log  {"kind":"call|email|meeting|note|task","body":...}
+GET /help this manual
+GET /healthz liveness probe (no auth)
+GET /readyz readiness probe - checks the database (no auth)
+GET /whoami identity + current workspace behind the token
+GET /tokens list your active tokens (sessions)
+DELETE /tokens/{id} revoke one of your tokens (log out a session)
 
-GET    /companies?<filters>&search=&sort=&limit=&cursor=  list/query companies (see QUERY)
-POST   /companies                   create OR update by domain (upsert)  {"name":...,"domain":...,"custom":{...}}
-GET    /companies/{id}              fetch one company
-PATCH  /companies/{id}              update fields
-DELETE /companies/{id}?confirm=     delete (two-step)
+GET /contacts?<filters>&search=&sort=&limit=&cursor= list/query contacts (see QUERY)
+POST /contacts create OR update by email (upsert) {"name":...,"email":...,"company_id":...,"stage":...,"tags":[...],"custom":{...}}
+GET /contacts/{id} fetch one contact
+PATCH /contacts/{id} update fields
+DELETE /contacts/{id}?confirm= delete (two-step)
+GET /contacts/{id}/activities activity log for a contact
+POST /contacts/{id}/activities log {"kind":"call|email|meeting|note|task","body":...}
 
-GET    /deals?<filters>&search=&sort=&limit=&cursor=      list/query deals (see QUERY)
-POST   /deals                       create  {"title":...,"amount_cents":...,"currency":"USD","stage":...,"contact_id":...,"company_id":...}
-GET    /deals/{id}                  fetch one deal
-PATCH  /deals/{id}                  update (e.g. {"stage":"won","status":"won"})
-DELETE /deals/{id}?confirm=         delete (two-step)
+GET /companies?<filters>&search=&sort=&limit=&cursor= list/query companies (see QUERY)
+POST /companies create OR update by domain (upsert) {"name":...,"domain":...,"custom":{...}}
+GET /companies/{id} fetch one company
+PATCH /companies/{id} update fields
+DELETE /companies/{id}?confirm= delete (two-step)
 
-GET    /reminders?days=&limit=      due/overdue follow-ups (contacts + deals due now; ?days=N looks ahead)
-GET    /activities?contact=&deal=&limit=          recent activities
-GET    /audit?limit=                workspace audit log
+GET /deals?<filters>&search=&sort=&limit=&cursor= list/query deals (see QUERY)
+POST /deals create {"title":...,"amount_cents":...,"currency":"USD","stage":...,"contact_id":...,"company_id":...}
+GET /deals/{id} fetch one deal
+PATCH /deals/{id} update (e.g. {"stage":"won","status":"won"})
+DELETE /deals/{id}?confirm= delete (two-step)
 
-REMINDERS (pull, not push)
---------------------------
+GET /reminders?days=&limit= due/overdue follow-ups (contacts + deals due now; ?days=N looks ahead)
+GET /activities?contact=&deal=&limit= recent activities
+GET /audit?limit= workspace audit log
+
+## REMINDERS (pull, not push)
+
 There is no background notifier. To track a follow-up, set follow_up_at (RFC3339)
 on a contact or deal, e.g. PATCH /contacts/{id} {"follow_up_at":"2026-06-10T09:00:00Z",
 "follow_up_note":"Send the renewal quote"}. Then read what is due with
 GET /reminders (overdue + due now) at the start of a session, or GET /reminders?days=7
 to look a week ahead. Clear a follow-up by PATCHing follow_up_at to null.
 
-EXAMPLES (curl)
----------------
+## EXAMPLES (curl)
+
 # begin login
+
 curl -s -X POST <base_url>/auth/request -d '{"email":"you@example.com"}'
 
 # create a contact (note the bearer token)
-curl -s -X POST <base_url>/contacts \
-  -H 'Authorization: Bearer ck_...' \
-  -d '{"name":"Jane Doe","email":"jane@acme.com","stage":"lead"}'
+
+curl -s -X POST <base*url>/contacts \
+ -H 'Authorization: Bearer ck*...' \
+ -d '{"name":"Jane Doe","email":"jane@acme.com","stage":"lead"}'
 
 Custom fields: any keys you put under "custom" are stored as-is and returned on
 the record, so the schema is extensible without server changes.
