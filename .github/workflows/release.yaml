@@ -75,6 +75,20 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Curated, grouped release notes from the conventional-commit history
+      # (this tag's section only). See cliff.toml.
+      - name: Generate release notes
+        id: notes
+        uses: orhun/git-cliff-action@v4
+        with:
+          config: cliff.toml
+          args: --latest --strip header
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
@@ -88,7 +102,7 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          generate_release_notes: true
+          body: ${{ steps.notes.outputs.content }}
           files: |
             dist/*.tar.gz
             dist/checksums.txt
