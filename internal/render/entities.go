@@ -96,6 +96,7 @@ func Contacts(list []protocol.Contact) string {
 func Contact(c protocol.Contact) string {
 	fields := []Field{
 		F("handle", protocol.FormatRef(protocol.KindContact, c.Handle)),
+		F("version", verStr(c.Version)),
 		F("name", c.Name),
 		F("email", c.Email),
 		F("phone", c.Phone),
@@ -177,6 +178,7 @@ func Companies(list []protocol.Company) string {
 func Company(c protocol.Company) string {
 	fields := []Field{
 		F("handle", protocol.FormatRef(protocol.KindCompany, c.Handle)),
+		F("version", verStr(c.Version)),
 		F("name", c.Name),
 		F("domain", c.Domain),
 		F("tags", strings.Join(c.Tags, ", ")),
@@ -226,6 +228,7 @@ func Deals(list []protocol.Deal) string {
 func Deal(d protocol.Deal) string {
 	fields := []Field{
 		F("handle", protocol.FormatRef(protocol.KindDeal, d.Handle)),
+		F("version", verStr(d.Version)),
 		F("title", d.Title),
 		F("amount", money(d.AmountCents, d.Currency)),
 		F("stage", d.Stage),
@@ -387,6 +390,15 @@ func countField(n int) string {
 		return ""
 	}
 	return strconv.Itoa(n)
+}
+
+// verStr renders a record version (the optimistic-concurrency token), or "" for
+// an unset value so the field is omitted.
+func verStr(v int64) string {
+	if v <= 0 {
+		return ""
+	}
+	return strconv.FormatInt(v, 10)
 }
 
 // Int parses an integer query value, returning def on failure.

@@ -67,6 +67,7 @@ func (s *sqlStore) CreateContact(ws string, c *protocol.Contact) error {
 		c.ID = protocol.NewID("c")
 	}
 	c.CreatedAt, c.UpdatedAt = now, now
+	c.Version = 1
 
 	tags, err := marshalTags(c.Tags)
 	if err != nil {
@@ -90,7 +91,7 @@ VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 	return s.fillContactRef(ws, c)
 }
 
-const contactColumns = `id, handle, name, email, phone, company_id, owner, stage, tags, notes, custom, follow_up_at, follow_up_note, created_at, updated_at, created_by`
+const contactColumns = `id, handle, version, name, email, phone, company_id, owner, stage, tags, notes, custom, follow_up_at, follow_up_note, created_at, updated_at, created_by`
 
 // GetContact loads one contact scoped to the workspace.
 func (s *sqlStore) GetContact(ws, id string) (protocol.Contact, error) {
@@ -125,9 +126,12 @@ WHERE workspace_id = ? AND email IS NOT NULL AND lower(email) = lower(?)`, ws, e
 	return out, rows.Err()
 }
 
-// UpdateContact persists the supplied contact (full overwrite of mutable
-// fields) within a workspace and bumps updated_at.
-func (s *sqlStore) UpdateContact(ws string, c *protocol.Contact) error {
+// UpdateContact persists the supplied contact (full overwrite of mutable fields)
+// within a workspace, bumps updated_at, and increments version. When ifMatch > 0
+// the write is conditional: it succeeds only if the row's current version equals
+// ifMatch, else ErrConflict (optimistic concurrency). ifMatch <= 0 disables the
+// check (last write wins).
+func (s *sqlStore) UpdateContact(ws string, c *protocol.Contact, ifMatch int64) error {
 	c.UpdatedAt = time.Now()
 	tags, err := marshalTags(c.Tags)
 	if err != nil {
@@ -138,14 +142,17 @@ func (s *sqlStore) UpdateContact(ws string, c *protocol.Contact) error {
 		return err
 	}
 	res, err := s.exec(`
-UPDATE contacts SET name=?, email=?, phone=?, company_id=?, owner=?, stage=?, tags=?, notes=?, custom=?, follow_up_at=?, follow_up_note=?, updated_at=?
-WHERE workspace_id = ? AND id = ?`,
+UPDATE contacts SET name=?, email=?, phone=?, company_id=?, owner=?, stage=?, tags=?, notes=?, custom=?, follow_up_at=?, follow_up_note=?, updated_at=?, version = version + 1
+WHERE workspace_id = ? AND id = ? AND (? <= 0 OR version = ?)`,
 		c.Name, c.Email, c.Phone, c.CompanyID, c.Owner, c.Stage, tags, c.Notes, custom,
-		nullableUnix(c.FollowUpAt), c.FollowUpNote, unix(c.UpdatedAt), ws, c.ID)
+		nullableUnix(c.FollowUpAt), c.FollowUpNote, unix(c.UpdatedAt), ws, c.ID, ifMatch, ifMatch)
 	if err != nil {
 		return err
 	}
-	if err := affectedOne(res); err != nil {
+	if err := s.checkConditional(res, ws, "contacts", c.ID, ifMatch); err != nil {
+		return err
+	}
+	if err := s.reloadVersion(ws, "contacts", c.ID, &c.Version); err != nil {
 		return err
 	}
 	return s.fillContactRef(ws, c)
@@ -172,7 +179,7 @@ func scanContact(sc scanner) (protocol.Contact, error) {
 		followAt           sql.NullInt64
 		createdAt, updated int64
 	)
-	err := sc.Scan(&c.ID, &c.Handle, &c.Name, &email, &phone, &companyID, &owner, &stage, &tags, &notes, &custom, &followAt, &followNote, &createdAt, &updated, &createdBy)
+	err := sc.Scan(&c.ID, &c.Handle, &c.Version, &c.Name, &email, &phone, &companyID, &owner, &stage, &tags, &notes, &custom, &followAt, &followNote, &createdAt, &updated, &createdBy)
 	if errors.Is(err, sql.ErrNoRows) {
 		return protocol.Contact{}, ErrNotFound
 	}
@@ -200,6 +207,7 @@ func (s *sqlStore) CreateCompany(ws string, c *protocol.Company) error {
 		c.ID = protocol.NewID("co")
 	}
 	c.CreatedAt, c.UpdatedAt = now, now
+	c.Version = 1
 	custom, err := marshalJSON(c.Custom)
 	if err != nil {
 		return err
@@ -217,7 +225,7 @@ VALUES (?,?,?,?,?,?,?,?,?,?,?)`, c.ID, ws, handle, c.Name, c.Domain, tags, c.Not
 	return err
 }
 
-const companyColumns = `id, handle, name, domain, tags, notes, custom, created_at, updated_at, created_by`
+const companyColumns = `id, handle, version, name, domain, tags, notes, custom, created_at, updated_at, created_by`
 
 // GetCompany loads one company scoped to the workspace.
 func (s *sqlStore) GetCompany(ws, id string) (protocol.Company, error) {
@@ -245,8 +253,10 @@ WHERE workspace_id = ? AND domain IS NOT NULL AND lower(domain) = lower(?)`, ws,
 	return out, rows.Err()
 }
 
-// UpdateCompany overwrites mutable company fields within a workspace.
-func (s *sqlStore) UpdateCompany(ws string, c *protocol.Company) error {
+// UpdateCompany overwrites mutable company fields within a workspace, bumps
+// updated_at, and increments version. See UpdateContact for the ifMatch
+// (optimistic-concurrency) semantics.
+func (s *sqlStore) UpdateCompany(ws string, c *protocol.Company, ifMatch int64) error {
 	c.UpdatedAt = time.Now()
 	custom, err := marshalJSON(c.Custom)
 	if err != nil {
@@ -256,12 +266,15 @@ func (s *sqlStore) UpdateCompany(ws string, c *protocol.Company) error {
 	if err != nil {
 		return err
 	}
-	res, err := s.exec(`UPDATE companies SET name=?, domain=?, tags=?, notes=?, custom=?, updated_at=? WHERE workspace_id = ? AND id = ?`,
-		c.Name, c.Domain, tags, c.Notes, custom, unix(c.UpdatedAt), ws, c.ID)
+	res, err := s.exec(`UPDATE companies SET name=?, domain=?, tags=?, notes=?, custom=?, updated_at=?, version = version + 1 WHERE workspace_id = ? AND id = ? AND (? <= 0 OR version = ?)`,
+		c.Name, c.Domain, tags, c.Notes, custom, unix(c.UpdatedAt), ws, c.ID, ifMatch, ifMatch)
 	if err != nil {
 		return err
 	}
-	return affectedOne(res)
+	if err := s.checkConditional(res, ws, "companies", c.ID, ifMatch); err != nil {
+		return err
+	}
+	return s.reloadVersion(ws, "companies", c.ID, &c.Version)
 }
 
 // DeleteCompany removes a company from a workspace.
@@ -281,7 +294,7 @@ func scanCompany(sc scanner) (protocol.Company, error) {
 		createdBy      sql.NullString
 		created, upd   int64
 	)
-	err := sc.Scan(&c.ID, &c.Handle, &c.Name, &domain, &tags, &notes, &custom, &created, &upd, &createdBy)
+	err := sc.Scan(&c.ID, &c.Handle, &c.Version, &c.Name, &domain, &tags, &notes, &custom, &created, &upd, &createdBy)
 	if errors.Is(err, sql.ErrNoRows) {
 		return protocol.Company{}, ErrNotFound
 	}
@@ -309,6 +322,7 @@ func (s *sqlStore) CreateDeal(ws string, d *protocol.Deal) error {
 		d.Status = "open"
 	}
 	d.CreatedAt, d.UpdatedAt = now, now
+	d.Version = 1
 	custom, err := marshalJSON(d.Custom)
 	if err != nil {
 		return err
@@ -327,7 +341,7 @@ VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 	return s.fillDealRef(ws, d)
 }
 
-const dealColumns = `id, handle, title, contact_id, company_id, amount_cents, currency, stage, status, custom, follow_up_at, follow_up_note, created_at, updated_at, created_by`
+const dealColumns = `id, handle, version, title, contact_id, company_id, amount_cents, currency, stage, status, custom, follow_up_at, follow_up_note, created_at, updated_at, created_by`
 
 // GetDeal loads one deal scoped to the workspace.
 func (s *sqlStore) GetDeal(ws, id string) (protocol.Deal, error) {
@@ -342,22 +356,27 @@ func (s *sqlStore) GetDeal(ws, id string) (protocol.Deal, error) {
 	return d, nil
 }
 
-// UpdateDeal overwrites mutable deal fields within a workspace.
-func (s *sqlStore) UpdateDeal(ws string, d *protocol.Deal) error {
+// UpdateDeal overwrites mutable deal fields within a workspace, bumps updated_at,
+// and increments version. See UpdateContact for the ifMatch (optimistic-
+// concurrency) semantics.
+func (s *sqlStore) UpdateDeal(ws string, d *protocol.Deal, ifMatch int64) error {
 	d.UpdatedAt = time.Now()
 	custom, err := marshalJSON(d.Custom)
 	if err != nil {
 		return err
 	}
 	res, err := s.exec(`
-UPDATE deals SET title=?, contact_id=?, company_id=?, amount_cents=?, currency=?, stage=?, status=?, custom=?, follow_up_at=?, follow_up_note=?, updated_at=?
-WHERE workspace_id = ? AND id = ?`,
+UPDATE deals SET title=?, contact_id=?, company_id=?, amount_cents=?, currency=?, stage=?, status=?, custom=?, follow_up_at=?, follow_up_note=?, updated_at=?, version = version + 1
+WHERE workspace_id = ? AND id = ? AND (? <= 0 OR version = ?)`,
 		d.Title, d.ContactID, d.CompanyID, d.AmountCents, d.Currency, d.Stage, d.Status, custom,
-		nullableUnix(d.FollowUpAt), d.FollowUpNote, unix(d.UpdatedAt), ws, d.ID)
+		nullableUnix(d.FollowUpAt), d.FollowUpNote, unix(d.UpdatedAt), ws, d.ID, ifMatch, ifMatch)
 	if err != nil {
 		return err
 	}
-	if err := affectedOne(res); err != nil {
+	if err := s.checkConditional(res, ws, "deals", d.ID, ifMatch); err != nil {
+		return err
+	}
+	if err := s.reloadVersion(ws, "deals", d.ID, &d.Version); err != nil {
 		return err
 	}
 	return s.fillDealRef(ws, d)
@@ -384,7 +403,7 @@ func scanDeal(sc scanner) (protocol.Deal, error) {
 		followAt                sql.NullInt64
 		created, upd            int64
 	)
-	err := sc.Scan(&d.ID, &d.Handle, &d.Title, &contactID, &companyID, &amount, &currency, &stage, &status, &custom, &followAt, &followNote, &created, &upd, &createdBy)
+	err := sc.Scan(&d.ID, &d.Handle, &d.Version, &d.Title, &contactID, &companyID, &amount, &currency, &stage, &status, &custom, &followAt, &followNote, &created, &upd, &createdBy)
 	if errors.Is(err, sql.ErrNoRows) {
 		return protocol.Deal{}, ErrNotFound
 	}
@@ -633,7 +652,7 @@ type AuditEntry struct {
 
 // ListAudit returns recent audit entries for a workspace, newest first. When
 // actorEmail is non-empty it returns only that member's actions (case-insensitive).
-func (s *sqlStore) ListAudit(ws, actorEmail string, limit int) ([]AuditEntry, error) {
+func (s *sqlStore) ListAudit(ws, actorEmail, target string, limit int) ([]AuditEntry, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 50
 	}
@@ -643,6 +662,10 @@ func (s *sqlStore) ListAudit(ws, actorEmail string, limit int) ([]AuditEntry, er
 	if actorEmail != "" {
 		sb.WriteString(` AND lower(actor_email) = lower(?)`)
 		args = append(args, actorEmail)
+	}
+	if target != "" {
+		sb.WriteString(` AND target = ?`)
+		args = append(args, target)
 	}
 	sb.WriteString(` ORDER BY created_at DESC LIMIT ?`)
 	args = append(args, limit)
@@ -688,6 +711,38 @@ func affectedOne(res interface{ RowsAffected() (int64, error) }) error {
 		return ErrNotFound
 	}
 	return nil
+}
+
+// checkConditional interprets the result of a conditional (If-Match) update. One
+// affected row means success. Zero means either the row is gone (ErrNotFound) or,
+// when an ifMatch was supplied, its version moved since the caller read it
+// (ErrConflict). table is code-controlled.
+func (s *sqlStore) checkConditional(res sql.Result, ws, table, id string, ifMatch int64) error {
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n > 0 {
+		return nil
+	}
+	var one int
+	e := s.queryRow("SELECT 1 FROM "+table+" WHERE workspace_id = ? AND id = ?", ws, id).Scan(&one)
+	if errors.Is(e, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	if e != nil {
+		return e
+	}
+	if ifMatch > 0 {
+		return ErrConflict
+	}
+	return ErrNotFound
+}
+
+// reloadVersion reads the current version of a row into *v, so an updated record
+// reflects its new (incremented) version. table is code-controlled.
+func (s *sqlStore) reloadVersion(ws, table, id string, v *int64) error {
+	return s.queryRow("SELECT version FROM "+table+" WHERE workspace_id = ? AND id = ?", ws, id).Scan(v)
 }
 
 // ---- relation name resolution (read-time display enrichment) -------------

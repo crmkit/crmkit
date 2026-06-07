@@ -25,6 +25,12 @@ handle in later calls (in a path, use it as the {id}, e.g. GET /contacts/k7m2q
 or GET /contacts/contact_k7m2q; both work). Relations are shown the same way
 (company=company_x7k2). You can grep responses: each line stands alone.
 
+CONCURRENT EDITS: a fetched contact/company/deal shows a "version". To avoid
+overwriting another agent's change, send that version back on a PATCH - either as
+"version": N in the body or an If-Match: N header. If the record changed since you
+read it the update is rejected with 412; GET it again, re-apply onto the current
+version, and retry. Omit the version to force the write (last edit wins).
+
 ## CONNECTING (pick your client)
 
 How to reach crmkit depends on the client:
@@ -207,7 +213,7 @@ DELETE /deals/{id}?confirm= delete (two-step)
 GET /reminders?days=&limit= due/overdue follow-ups (contacts + deals due now; ?days=N looks ahead)
 GET /activities?contact=&deal=&company=&limit= recent activities (each shows by= who logged it)
 DELETE /activities/{id} delete one activity (one-shot, no confirm; e.g. a mistake or to free quota)
-GET /audit?by=&limit= workspace audit log - who did what; by=email filters to one member (human or agent)
+GET /audit?by=&target=&limit= audit log = record history: who did what, and what changed (an update's detail shows the field diff, e.g. "stage: lead -> customer"). by=email filters to one member; target=<handle> (e.g. contact_k7m2q) scopes it to one record's history
 
 ## REMINDERS (pull, not push)
 

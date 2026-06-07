@@ -32,6 +32,23 @@ crmkit is that core - one well-maintained, battle-tested foundation that many
 agents and deployments share, so you build on solved problems instead of
 rediscovering them ad hoc in every project.
 
+## Use cases
+
+crmkit is useful anywhere an agent needs to remember people, organizations,
+opportunities, and follow-up work in one shared system:
+
+- **Sales CRM** - track leads, accounts, deals, activities, next steps, and
+  pipeline movement without building a dashboard first.
+- **Personal contact management** - keep notes, reminders, relationship context,
+  and follow-ups for your own network.
+- **Customer support** - record customers, companies, conversations, issues,
+  escalations, and renewal or upsell opportunities.
+- **Market monitoring** - track funded companies, competitors, target accounts,
+  hiring signals, product launches, and other entities an agent watches over
+  time.
+- **Fundraising** - manage investors, intros, conversations, diligence status,
+  commitments, and follow-up tasks across a raise.
+
 ## Why it looks the way it does
 
 - **Plain text by default, JSON on demand.** Responses are one labeled,

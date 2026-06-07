@@ -26,6 +26,11 @@ import (
 // ErrNotFound is returned when a lookup matches no row in the workspace.
 var ErrNotFound = errors.New("not found")
 
+// ErrConflict is returned by a conditional (If-Match) update when the record's
+// current version does not match the caller's expected version - i.e. it changed
+// since the caller last read it (optimistic concurrency).
+var ErrConflict = errors.New("version conflict")
+
 // ErrTokenExpired is returned when a token is valid but has exceeded its sliding
 // inactivity window.
 var ErrTokenExpired = errors.New("token expired")

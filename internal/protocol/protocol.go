@@ -171,7 +171,11 @@ type Contact struct {
 	ID string `json:"id"`
 	// Handle is the short, workspace-scoped public reference (bare, e.g. "k7m2q").
 	// Agents address the record by this; ID is the durable opaque global key.
-	Handle    string `json:"handle,omitempty"`
+	Handle string `json:"handle,omitempty"`
+	// Version increments on every update. Read it, then send it back as If-Match
+	// (header) or "version" (body) on a PATCH to make the write conditional - the
+	// update is rejected (412) if the record changed in the meantime.
+	Version   int64  `json:"version,omitempty"`
 	Name      string `json:"name"`
 	Email     string `json:"email,omitempty"`
 	Phone     string `json:"phone,omitempty"`
@@ -204,7 +208,8 @@ type Contact struct {
 // Company is an organization that contacts and deals belong to.
 type Company struct {
 	ID        string         `json:"id"`
-	Handle    string         `json:"handle,omitempty"` // short public reference; see Contact.Handle
+	Handle    string         `json:"handle,omitempty"`  // short public reference; see Contact.Handle
+	Version   int64          `json:"version,omitempty"` // optimistic-concurrency token; see Contact.Version
 	Name      string         `json:"name"`
 	Domain    string         `json:"domain,omitempty"`
 	Tags      []string       `json:"tags,omitempty"`
@@ -223,7 +228,8 @@ type Company struct {
 // Deal is an opportunity moving through a pipeline.
 type Deal struct {
 	ID        string `json:"id"`
-	Handle    string `json:"handle,omitempty"` // short public reference; see Contact.Handle
+	Handle    string `json:"handle,omitempty"`  // short public reference; see Contact.Handle
+	Version   int64  `json:"version,omitempty"` // optimistic-concurrency token; see Contact.Version
 	Title     string `json:"title"`
 	ContactID string `json:"contact_id,omitempty"`
 	CompanyID string `json:"company_id,omitempty"`
