@@ -3,9 +3,11 @@ package server
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -23,14 +25,20 @@ func confirmToken(id string) string {
 
 // requireConfirm checks the ?confirm token for a destructive request. It writes
 // a 409 with the expected token and returns false when confirmation is missing.
+// The confirm token is keyed off the durable internal id (stable regardless of
+// how the record was referenced); the message echoes the agent's own reference
+// (the short handle it used) so it reads naturally and stays token-cheap.
 func (s *Server) requireConfirm(w http.ResponseWriter, r *http.Request, kind, id string) bool {
 	want := confirmToken(id)
 	if strings.TrimSpace(r.URL.Query().Get("confirm")) == want {
 		return true
 	}
-	handle := protocol.Handle(kind, id)
+	ref := r.PathValue("id")
+	if ref == "" {
+		ref = protocol.FormatRef(kind, id)
+	}
 	render.Error(w, r, http.StatusConflict, "confirmation_required",
-		"Deleting "+handle+" is irreversible. Confirm with the user, then repeat with ?confirm="+want)
+		"Deleting "+ref+" is irreversible. Confirm with the user, then repeat with ?confirm="+want)
 	return false
 }
 
@@ -67,6 +75,70 @@ func (s *Server) relationID(ws, kind, ref string) string {
 		return id
 	}
 	return ref
+}
+
+// auditKinds is the set of entity kinds whose audit targets can be filtered by
+// a record reference.
+var auditKinds = map[string]bool{
+	protocol.KindContact: true,
+	protocol.KindCompany: true,
+	protocol.KindDeal:    true,
+}
+
+// resolveAuditTarget turns a record reference (a handle like "contact_k7m2q")
+// into the stored audit target form ("contact/<internal-id>") so audit can be
+// filtered to one record. A blank or unresolvable ref yields "" (no filter); an
+// already-internal "kind/id" target is matched literally.
+func (s *Server) resolveAuditTarget(ws, ref string) string {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return ""
+	}
+	kind := ref
+	if i := strings.IndexByte(ref, '_'); i >= 0 {
+		kind = ref[:i]
+	}
+	if auditKinds[kind] {
+		if id, err := s.store.ResolveHandle(ws, kind, ref); err == nil {
+			return protocol.Handle(kind, id)
+		}
+	}
+	return ref
+}
+
+// expectedVersion returns the record version the client expects, for a
+// conditional (optimistic-concurrency) update, or 0 when none was supplied
+// (meaning "no check - last write wins"). It reads the If-Match header first,
+// then a "version" field in the JSON body, so agents can use either channel.
+func expectedVersion(r *http.Request, body []byte) int64 {
+	if m := strings.Trim(r.Header.Get("If-Match"), `" `); m != "" && m != "*" {
+		if n, err := strconv.ParseInt(m, 10, 64); err == nil {
+			return n
+		}
+	}
+	var probe struct {
+		Version int64 `json:"version"`
+	}
+	_ = json.Unmarshal(body, &probe)
+	return probe.Version
+}
+
+// writeUpdateErr maps a store update error to the right response and returns true
+// when it wrote one. A version conflict is 412 (the If-Match precondition failed);
+// the message tells the agent how to recover.
+func (s *Server) writeUpdateErr(w http.ResponseWriter, r *http.Request, kind string, err error) bool {
+	switch {
+	case err == nil:
+		return false
+	case errors.Is(err, store.ErrConflict):
+		render.Error(w, r, http.StatusPreconditionFailed, "version_conflict",
+			"This "+kind+" changed since you last read it. GET it again, re-apply your change onto the current version, then retry.")
+	case errors.Is(err, store.ErrNotFound):
+		s.notFound(w, r, kind)
+	default:
+		s.serverErr(w, r)
+	}
+	return true
 }
 
 // ---- contacts ------------------------------------------------------------
@@ -129,7 +201,7 @@ func (s *Server) handleCreateContact(w http.ResponseWriter, r *http.Request) {
 			}
 			existing.CreatedBy = creator
 			existing.CompanyID = s.relationID(sess.WorkspaceID, protocol.KindCompany, existing.CompanyID)
-			if err := s.store.UpdateContact(sess.WorkspaceID, &existing); err != nil {
+			if err := s.store.UpdateContact(sess.WorkspaceID, &existing, 0); err != nil {
 				s.serverErr(w, r)
 				return
 			}
@@ -195,17 +267,25 @@ func (s *Server) handleUpdateContact(w http.ResponseWriter, r *http.Request) {
 		s.serverErr(w, r)
 		return
 	}
+	// Snapshot the pre-edit state (clone the tag slice, which decode may reuse) so
+	// we can record what changed in the audit.
+	before := c
+	before.Tags = append([]string(nil), c.Tags...)
 	// Decode patch onto the existing record so omitted fields are preserved.
-	if err := decodeJSON(r, &c); err != nil {
+	body, err := readBody(r)
+	if err != nil {
+		render.Error(w, r, http.StatusBadRequest, "bad_request", "Could not read the request body.")
+		return
+	}
+	if err := decodeBytes(body, &c); err != nil {
 		render.Error(w, r, http.StatusBadRequest, "bad_request", "Send a JSON object with only the fields you want to change.")
 		return
 	}
 	c.CompanyID = s.relationID(sess.WorkspaceID, protocol.KindCompany, c.CompanyID)
-	if err := s.store.UpdateContact(sess.WorkspaceID, &c); err != nil {
-		s.serverErr(w, r)
+	if s.writeUpdateErr(w, r, "contact", s.store.UpdateContact(sess.WorkspaceID, &c, expectedVersion(r, body))) {
 		return
 	}
-	s.audit(sess, "contact.update", protocol.Handle(protocol.KindContact, c.ID), "")
+	s.audit(sess, "contact.update", protocol.Handle(protocol.KindContact, c.ID), diffContact(before, c))
 	c = c.Localized(locationOf(sess))
 	render.Respond(w, r, http.StatusOK, c, render.Contact(c))
 }
@@ -227,7 +307,7 @@ func (s *Server) handleDeleteContact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.audit(sess, "contact.delete", protocol.Handle(protocol.KindContact, id), "")
-	render.Text(w, r, http.StatusOK, "OK deleted "+protocol.Handle(protocol.KindContact, id))
+	render.Text(w, r, http.StatusOK, "OK deleted "+r.PathValue("id"))
 }
 
 func (s *Server) handleListContactActivities(w http.ResponseWriter, r *http.Request) {
@@ -379,7 +459,7 @@ func (s *Server) handleCreateCompany(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			existing.CreatedBy = creator
-			if err := s.store.UpdateCompany(sess.WorkspaceID, &existing); err != nil {
+			if err := s.store.UpdateCompany(sess.WorkspaceID, &existing, 0); err != nil {
 				s.serverErr(w, r)
 				return
 			}
@@ -444,15 +524,21 @@ func (s *Server) handleUpdateCompany(w http.ResponseWriter, r *http.Request) {
 		s.serverErr(w, r)
 		return
 	}
-	if err := decodeJSON(r, &c); err != nil {
+	before := c
+	before.Tags = append([]string(nil), c.Tags...)
+	body, err := readBody(r)
+	if err != nil {
+		render.Error(w, r, http.StatusBadRequest, "bad_request", "Could not read the request body.")
+		return
+	}
+	if err := decodeBytes(body, &c); err != nil {
 		render.Error(w, r, http.StatusBadRequest, "bad_request", "Send a JSON object with only the fields you want to change.")
 		return
 	}
-	if err := s.store.UpdateCompany(sess.WorkspaceID, &c); err != nil {
-		s.serverErr(w, r)
+	if s.writeUpdateErr(w, r, "company", s.store.UpdateCompany(sess.WorkspaceID, &c, expectedVersion(r, body))) {
 		return
 	}
-	s.audit(sess, "company.update", protocol.Handle(protocol.KindCompany, c.ID), "")
+	s.audit(sess, "company.update", protocol.Handle(protocol.KindCompany, c.ID), diffCompany(before, c))
 	c = c.Localized(locationOf(sess))
 	render.Respond(w, r, http.StatusOK, c, render.Company(c))
 }
@@ -474,7 +560,7 @@ func (s *Server) handleDeleteCompany(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.audit(sess, "company.delete", protocol.Handle(protocol.KindCompany, id), "")
-	render.Text(w, r, http.StatusOK, "OK deleted "+protocol.Handle(protocol.KindCompany, id))
+	render.Text(w, r, http.StatusOK, "OK deleted "+r.PathValue("id"))
 }
 
 // ---- deals ---------------------------------------------------------------
@@ -563,18 +649,23 @@ func (s *Server) handleUpdateDeal(w http.ResponseWriter, r *http.Request) {
 		s.serverErr(w, r)
 		return
 	}
-	if err := decodeJSON(r, &d); err != nil {
+	before := d
+	body, err := readBody(r)
+	if err != nil {
+		render.Error(w, r, http.StatusBadRequest, "bad_request", "Could not read the request body.")
+		return
+	}
+	if err := decodeBytes(body, &d); err != nil {
 		render.Error(w, r, http.StatusBadRequest, "bad_request",
 			`Send a JSON object with only the fields you want to change, e.g. {"stage":"won","status":"won"}.`)
 		return
 	}
 	d.ContactID = s.relationID(sess.WorkspaceID, protocol.KindContact, d.ContactID)
 	d.CompanyID = s.relationID(sess.WorkspaceID, protocol.KindCompany, d.CompanyID)
-	if err := s.store.UpdateDeal(sess.WorkspaceID, &d); err != nil {
-		s.serverErr(w, r)
+	if s.writeUpdateErr(w, r, "deal", s.store.UpdateDeal(sess.WorkspaceID, &d, expectedVersion(r, body))) {
 		return
 	}
-	s.audit(sess, "deal.update", protocol.Handle(protocol.KindDeal, d.ID), d.Stage)
+	s.audit(sess, "deal.update", protocol.Handle(protocol.KindDeal, d.ID), diffDeal(before, d))
 	d = d.Localized(locationOf(sess))
 	render.Respond(w, r, http.StatusOK, d, render.Deal(d))
 }
@@ -596,7 +687,7 @@ func (s *Server) handleDeleteDeal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.audit(sess, "deal.delete", protocol.Handle(protocol.KindDeal, id), "")
-	render.Text(w, r, http.StatusOK, "OK deleted "+protocol.Handle(protocol.KindDeal, id))
+	render.Text(w, r, http.StatusOK, "OK deleted "+r.PathValue("id"))
 }
 
 // ---- reminders -----------------------------------------------------------
@@ -653,13 +744,14 @@ func (s *Server) handleDeleteActivity(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.audit(sess, "activity.delete", protocol.Handle(protocol.KindActivity, id), "")
-	render.Text(w, r, http.StatusOK, "OK deleted "+protocol.Handle(protocol.KindActivity, id))
+	render.Text(w, r, http.StatusOK, "OK deleted "+r.PathValue("id"))
 }
 
 func (s *Server) handleListAudit(w http.ResponseWriter, r *http.Request) {
 	sess := sessionFrom(r)
 	by := strings.TrimSpace(r.URL.Query().Get("by"))
-	list, err := s.store.ListAudit(sess.WorkspaceID, by, render.Int(r.URL.Query().Get("limit"), 50))
+	target := s.resolveAuditTarget(sess.WorkspaceID, r.URL.Query().Get("target"))
+	list, err := s.store.ListAudit(sess.WorkspaceID, by, target, render.Int(r.URL.Query().Get("limit"), 50))
 	if err != nil {
 		s.serverErr(w, r)
 		return

@@ -137,6 +137,17 @@ var migrations = []Migration{
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_deals_ws_handle ON deals(workspace_id, handle)`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_activities_ws_handle ON activities(workspace_id, handle)`,
 	}},
+	// v11 (2026-06-07): optimistic concurrency. Each updatable record carries a
+	// monotonic version that increments on every write; a conditional update
+	// (If-Match) only succeeds when the caller's expected version still matches,
+	// so two agents editing the same record can't silently clobber each other.
+	// Activities are append-only (no update), so they need no version. Existing
+	// rows start at 1.
+	{Version: 11, Name: "record version", Statements: []string{
+		`ALTER TABLE contacts ADD COLUMN version BIGINT NOT NULL DEFAULT 1`,
+		`ALTER TABLE companies ADD COLUMN version BIGINT NOT NULL DEFAULT 1`,
+		`ALTER TABLE deals ADD COLUMN version BIGINT NOT NULL DEFAULT 1`,
+	}},
 }
 
 // MigrationState reports how the database's schema compares to the code.

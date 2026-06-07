@@ -256,7 +256,7 @@ func TestContactCRUDAndIsolation(t *testing.T) {
 
 	// Update.
 	got.Stage = "qualified"
-	if err := st.UpdateContact(wsA, &got); err != nil {
+	if err := st.UpdateContact(wsA, &got, 0); err != nil {
 		t.Fatalf("update: %v", err)
 	}
 	reread, _ := st.GetContact(wsA, c.ID)
@@ -312,7 +312,7 @@ func TestReminders(t *testing.T) {
 	}
 	got.FollowUpAt = nil
 	got.FollowUpNote = ""
-	_ = st.UpdateContact(ws, &got)
+	_ = st.UpdateContact(ws, &got, 0)
 	if rec, _ := st.GetContact(ws, overdue.ID); rec.FollowUpAt != nil {
 		t.Fatal("follow_up_at should clear to nil")
 	}

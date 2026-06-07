@@ -104,7 +104,7 @@ type Store interface {
 	GetContact(ws, id string) (protocol.Contact, error)
 	QueryContacts(ws string, q Query) ([]protocol.Contact, string, error)
 	FindContactByEmail(ws, email string) ([]protocol.Contact, error)
-	UpdateContact(ws string, c *protocol.Contact) error
+	UpdateContact(ws string, c *protocol.Contact, ifMatch int64) error
 	DeleteContact(ws, id string) error
 
 	// companies
@@ -112,14 +112,14 @@ type Store interface {
 	GetCompany(ws, id string) (protocol.Company, error)
 	QueryCompanies(ws string, q Query) ([]protocol.Company, string, error)
 	FindCompanyByDomain(ws, domain string) ([]protocol.Company, error)
-	UpdateCompany(ws string, c *protocol.Company) error
+	UpdateCompany(ws string, c *protocol.Company, ifMatch int64) error
 	DeleteCompany(ws, id string) error
 
 	// deals
 	CreateDeal(ws string, d *protocol.Deal) error
 	GetDeal(ws, id string) (protocol.Deal, error)
 	QueryDeals(ws string, q Query) ([]protocol.Deal, string, error)
-	UpdateDeal(ws string, d *protocol.Deal) error
+	UpdateDeal(ws string, d *protocol.Deal, ifMatch int64) error
 	DeleteDeal(ws, id string) error
 
 	// reminders (due/overdue follow-ups across contacts and deals)
@@ -131,7 +131,7 @@ type Store interface {
 	ListActivities(ws, contactID, dealID, companyID string, limit int) ([]protocol.Activity, error)
 	ActivityStats(ws, contactID, dealID, companyID string) (int, time.Time, error)
 	WriteAudit(ws, tokenID, actorEmail, action, target, detail string) error
-	ListAudit(ws, actorEmail string, limit int) ([]AuditEntry, error)
+	ListAudit(ws, actorEmail, target string, limit int) ([]AuditEntry, error)
 	PruneAuditForPlan(plan string, before int64) (int64, error)
 }
 

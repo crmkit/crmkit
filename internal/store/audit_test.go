@@ -48,7 +48,7 @@ VALUES (?,?,?,?,?,?,?,?)`,
 		t.Fatalf("expected 1 pruned, got %d", n)
 	}
 
-	list, err := st.ListAudit(ws.ID, "", 10)
+	list, err := st.ListAudit(ws.ID, "", "", 10)
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
