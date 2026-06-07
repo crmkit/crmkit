@@ -46,6 +46,27 @@ jobs:
             echo "Tag v${{ steps.version.outputs.version }} does not exist"
           fi
 
+      # Regenerate CHANGELOG.md from the conventional-commit history (treating the
+      # not-yet-tagged commits as this release) and commit it to main, so the tag
+      # below points at a commit with an up-to-date changelog. See cliff.toml.
+      - name: Update changelog
+        if: steps.check_tag.outputs.exists == 'false'
+        uses: orhun/git-cliff-action@v4
+        with:
+          config: cliff.toml
+          args: --tag v${{ steps.version.outputs.version }} -o CHANGELOG.md
+
+      - name: Commit changelog
+        if: steps.check_tag.outputs.exists == 'false'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if ! git diff --quiet -- CHANGELOG.md; then
+            git add CHANGELOG.md
+            git commit -m "docs: update changelog for v${{ steps.version.outputs.version }} [skip ci]"
+            git push origin HEAD:main
+          fi
+
       - name: Create and push tag
         if: steps.check_tag.outputs.exists == 'false'
         run: |

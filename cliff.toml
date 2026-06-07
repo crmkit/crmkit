@@ -1,0 +1,61 @@
+# git-cliff configuration (https://git-cliff.org).
+#
+# Turns the conventional-commit history (feat:/fix:/perf:/...) into curated
+# release notes: CHANGELOG.md is maintained by the tag workflow, and each GitHub
+# Release body is the latest section. Only user-facing groups are shown; chores,
+# CI, tests, docs, refactors, version bumps, and automation noise are filtered.
+
+[changelog]
+header = """
+# Changelog
+
+All notable changes to crmkit. Generated from conventional commits by \
+[git-cliff](https://git-cliff.org).
+"""
+body = """
+{% if version -%}
+## [{{ version | trim_start_matches(pat="v") }}] - {{ timestamp | date(format="%Y-%m-%d") }}
+{% else -%}
+## [unreleased]
+{% endif -%}
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group | striptags | trim | upper_first }}
+{% for commit in commits %}
+- {{ commit.message | upper_first }}
+{%- endfor %}
+{% endfor %}
+"""
+trim = true
+footer = ""
+
+[git]
+conventional_commits = true
+filter_unconventional = true
+filter_commits = true
+topo_order = false
+sort_commits = "oldest"
+tag_pattern = "v[0-9].*"
+
+# First match wins, so the noise-skips precede the grouping rules. The HTML
+# comment prefixes on group names only set ordering (Features < Fixes < Perf);
+# the template strips them with `striptags`.
+commit_parsers = [
+  # Drop automation / housekeeping noise (these are still in git history).
+  { message = "(?i)^(feat|chore)(\\(.*\\))?:?\\s*(bump|update) version", skip = true },
+  { message = "(?i)update version to", skip = true },
+  { message = "(?i)stage uncommitted changes from copilot", skip = true },
+  # README/marketing edits are sometimes committed as feat:; they aren't product
+  # changes, so keep them out of release notes.
+  { message = "(?i)readme", skip = true },
+  { message = "^chore", skip = true },
+  { message = "^ci", skip = true },
+  { message = "^test", skip = true },
+  { message = "^docs", skip = true },
+  { message = "^refactor", skip = true },
+  { message = "^style", skip = true },
+  { message = "^build", skip = true },
+  # User-facing groups.
+  { message = "^feat", group = "<!-- 0 -->Features" },
+  { message = "^fix", group = "<!-- 1 -->Bug Fixes" },
+  { message = "^perf", group = "<!-- 2 -->Performance" },
+]
