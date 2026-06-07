@@ -438,6 +438,16 @@ VALUES (?,?,?,?,?,?,?,?,?)`, a.ID, ws, a.ContactID, a.DealID, a.CompanyID, a.Kin
 	return err
 }
 
+// DeleteActivity removes one activity from a workspace (e.g. a mistaken entry, or
+// to free room under the activity quota).
+func (s *sqlStore) DeleteActivity(ws, id string) error {
+	res, err := s.exec(`DELETE FROM activities WHERE workspace_id = ? AND id = ?`, ws, id)
+	if err != nil {
+		return err
+	}
+	return affectedOne(res)
+}
+
 // ListActivities returns activities for a workspace, optionally filtered by
 // contact, deal, or company, newest first.
 func (s *sqlStore) ListActivities(ws, contactID, dealID, companyID string, limit int) ([]protocol.Activity, error) {
@@ -526,6 +536,21 @@ func (s *sqlStore) WriteAudit(ws, tokenID, actorEmail, action, target, detail st
 INSERT INTO audit_log (id, workspace_id, token_id, actor_email, action, target, detail, created_at)
 VALUES (?,?,?,?,?,?,?,?)`, protocol.NewID("aud"), ws, tokenID, actorEmail, action, target, detail, unix(time.Now()))
 	return err
+}
+
+// PruneAuditForPlan deletes audit entries older than `before` (unix seconds)
+// belonging to workspaces on the given plan, returning how many were removed.
+// Retention is a per-plan window, so the sweep runs once per plan; workspaces on
+// a plan not in the catalogue are simply left untouched (over-retain, the safe
+// direction for a security log). The audit log is bounded by age, not count.
+func (s *sqlStore) PruneAuditForPlan(plan string, before int64) (int64, error) {
+	res, err := s.exec(
+		`DELETE FROM audit_log WHERE created_at < ? AND workspace_id IN (SELECT id FROM workspaces WHERE plan = ?)`,
+		before, plan)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
 }
 
 // AuditEntry is one recorded action.

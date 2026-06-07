@@ -110,6 +110,12 @@ var migrations = []Migration{
 		`ALTER TABLE companies ADD COLUMN notes TEXT`,
 		`ALTER TABLE activities ADD COLUMN company_id TEXT`,
 	}},
+	// v9 (2026-06-07): index the audit log by time so the retention prune
+	// (DELETE WHERE created_at < cutoff) is cheap. The audit log is a security
+	// log, bounded by age rather than count.
+	{Version: 9, Name: "audit created_at index", Statements: []string{
+		`CREATE INDEX IF NOT EXISTS idx_audit_log_created_at ON audit_log(created_at)`,
+	}},
 }
 
 // MigrationState reports how the database's schema compares to the code.

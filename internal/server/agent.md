@@ -205,6 +205,7 @@ DELETE /deals/{id}?confirm= delete (two-step)
 
 GET /reminders?days=&limit= due/overdue follow-ups (contacts + deals due now; ?days=N looks ahead)
 GET /activities?contact=&deal=&company=&limit= recent activities (each shows by= who logged it)
+DELETE /activities/{id} delete one activity (one-shot, no confirm; e.g. a mistake or to free quota)
 GET /audit?by=&limit= workspace audit log - who did what; by=email filters to one member (human or agent)
 
 ## REMINDERS (pull, not push)

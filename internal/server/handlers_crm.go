@@ -218,6 +218,9 @@ func (s *Server) handleCreateContactActivity(w http.ResponseWriter, r *http.Requ
 		render.Error(w, r, http.StatusBadRequest, "missing_field", `"body" is required to log an activity.`)
 		return
 	}
+	if !s.enforceWorkspaceQuota(w, r, sess.WorkspaceID, "activities") {
+		return
+	}
 	a.ContactID = id
 	a.CreatedBy = sess.Email
 	if err := s.store.CreateActivity(sess.WorkspaceID, &a); err != nil {
@@ -252,6 +255,9 @@ func (s *Server) handleCreateCompanyActivity(w http.ResponseWriter, r *http.Requ
 	}
 	if strings.TrimSpace(a.Body) == "" {
 		render.Error(w, r, http.StatusBadRequest, "missing_field", `"body" is required to log an activity.`)
+		return
+	}
+	if !s.enforceWorkspaceQuota(w, r, sess.WorkspaceID, "activities") {
 		return
 	}
 	a.CompanyID = id
@@ -547,6 +553,23 @@ func (s *Server) handleListActivities(w http.ResponseWriter, r *http.Request) {
 	}
 	list = localizedSlice(list, locationOf(sess))
 	s.respondList(w, r, list, render.Activities(list), "")
+}
+
+// handleDeleteActivity removes one activity. Unlike contacts/companies/deals it
+// is a one-shot delete (no confirm step): an activity is a single low-stakes log
+// line, and you may prune several to free room under the activity quota.
+func (s *Server) handleDeleteActivity(w http.ResponseWriter, r *http.Request) {
+	sess := sessionFrom(r)
+	id := r.PathValue("id")
+	if err := s.store.DeleteActivity(sess.WorkspaceID, id); errors.Is(err, store.ErrNotFound) {
+		render.Error(w, r, http.StatusNotFound, "not_found", "No activity with that id in your workspace.")
+		return
+	} else if err != nil {
+		s.serverErr(w, r)
+		return
+	}
+	s.audit(sess, "activity.delete", protocol.Handle(protocol.KindActivity, id), "")
+	render.Text(w, r, http.StatusOK, "OK deleted "+protocol.Handle(protocol.KindActivity, id))
 }
 
 func (s *Server) handleListAudit(w http.ResponseWriter, r *http.Request) {

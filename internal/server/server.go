@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/crmkit/crmkit/internal/auth"
@@ -39,6 +40,10 @@ type Server struct {
 	// MCP tools reuse the exact CRM handlers (auth, validation, plain-text output).
 	internalOnce sync.Once
 	internalMux  http.Handler
+
+	// lastAuditPrune is the unix time of the last audit-retention sweep; the prune
+	// piggybacks on audit writes, throttled to at most once per auditPruneInterval.
+	lastAuditPrune atomic.Int64
 }
 
 // New constructs a Server from a loaded config, an open store backend, and a
@@ -135,6 +140,7 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	// Reminders, activities & audit.
 	mux.HandleFunc("GET /reminders", s.authed(s.handleListReminders))
 	mux.HandleFunc("GET /activities", s.authed(s.handleListActivities))
+	mux.HandleFunc("DELETE /activities/{id}", s.authed(s.handleDeleteActivity))
 	mux.HandleFunc("GET /audit", s.authed(s.handleListAudit))
 
 	// MCP (Model Context Protocol) endpoint - JSON-RPC over Streamable HTTP. It
@@ -356,4 +362,43 @@ func (s *Server) audit(sess protocol.Session, action, target, detail string) {
 	if err := s.store.WriteAudit(sess.WorkspaceID, sess.TokenID, sess.Email, action, target, detail); err != nil {
 		s.log.Warn("audit write failed", slog.String("error", err.Error()))
 	}
+	s.maybePruneAudit()
+}
+
+// auditPruneInterval throttles how often the retention sweep runs - it
+// piggybacks on audit writes (which is exactly when the table grows), so no
+// always-on goroutine is needed (a good fit for scale-to-zero deployments).
+const auditPruneInterval = time.Hour
+
+// maybePruneAudit fires the retention sweep at most once per auditPruneInterval,
+// in the background so it never adds latency to the request. Retention is a
+// per-plan window, so the sweep prunes each plan against its own cutoff; a plan
+// with AuditRetentionDays <= 0 keeps its audit forever.
+func (s *Server) maybePruneAudit() {
+	now := time.Now().Unix()
+	last := s.lastAuditPrune.Load()
+	if now-last < int64(auditPruneInterval.Seconds()) {
+		return
+	}
+	// Only one caller wins the slot; others skip until the next interval.
+	if !s.lastAuditPrune.CompareAndSwap(last, now) {
+		return
+	}
+	go func() {
+		for plan, limits := range s.cfg.Plans.Catalogue {
+			days := limits.AuditRetentionDays
+			if days <= 0 {
+				continue // this plan keeps audit forever
+			}
+			cutoff := time.Now().AddDate(0, 0, -days).Unix()
+			n, err := s.store.PruneAuditForPlan(plan, cutoff)
+			if err != nil {
+				s.log.Warn("audit prune failed", slog.String("plan", plan), slog.String("error", err.Error()))
+				continue
+			}
+			if n > 0 {
+				s.log.Info("pruned audit log", slog.String("plan", plan), slog.Int64("deleted", n), slog.Int("retention_days", days))
+			}
+		}
+	}()
 }
