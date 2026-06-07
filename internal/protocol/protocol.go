@@ -149,11 +149,17 @@ type Company struct {
 	ID        string         `json:"id"`
 	Name      string         `json:"name"`
 	Domain    string         `json:"domain,omitempty"`
+	Tags      []string       `json:"tags,omitempty"`
+	Notes     string         `json:"notes,omitempty"`
 	Custom    map[string]any `json:"custom,omitempty"`
 	CreatedAt time.Time      `json:"created_at"`
 	UpdatedAt time.Time      `json:"updated_at"`
 	// CreatedBy is the member (human or agent) who created this record.
 	CreatedBy string `json:"created_by,omitempty"`
+	// ActivityCount / LastActivityAt summarise the company's activity log,
+	// populated on a single-record fetch for display (never persisted).
+	ActivityCount  int        `json:"activity_count,omitempty"`
+	LastActivityAt *time.Time `json:"last_activity_at,omitempty"`
 }
 
 // Deal is an opportunity moving through a pipeline.
@@ -205,6 +211,7 @@ type Activity struct {
 	ID        string    `json:"id"`
 	ContactID string    `json:"contact_id,omitempty"`
 	DealID    string    `json:"deal_id,omitempty"`
+	CompanyID string    `json:"company_id,omitempty"`
 	Kind      string    `json:"kind"` // note | call | email | meeting | task
 	Body      string    `json:"body"`
 	CreatedBy string    `json:"created_by,omitempty"`
@@ -245,6 +252,7 @@ func (c Contact) Localized(loc *time.Location) Contact {
 func (c Company) Localized(loc *time.Location) Company {
 	c.CreatedAt = inLoc(c.CreatedAt, loc)
 	c.UpdatedAt = inLoc(c.UpdatedAt, loc)
+	c.LastActivityAt = inLocPtr(c.LastActivityAt, loc)
 	return c
 }
 

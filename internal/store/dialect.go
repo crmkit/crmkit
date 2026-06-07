@@ -29,6 +29,17 @@ var (
 	postgresDialect = dialect{driver: "pgx", placeholder: placeholderDollar, like: "ILIKE"}
 )
 
+// jsonText returns an SQL expression that extracts top-level `key` from the JSON
+// `column` as text, plus the argument to bind for the single "?" it contains. The
+// key is ALWAYS a bound parameter (never interpolated), so a user-supplied custom
+// field name cannot inject SQL; `column` is a code-controlled identifier.
+func (d dialect) jsonText(column, key string) (expr, arg string) {
+	if d.driver == "pgx" {
+		return "(" + column + "::jsonb ->> ?)", key
+	}
+	return "json_extract(" + column + ", ?)", "$." + key
+}
+
 // rebind converts "?" placeholders to the dialect's form. For SQLite it is a
 // no-op; for Postgres it numbers them $1, $2, … in order of appearance. Our SQL
 // never contains a literal "?", so a straight scan is safe.

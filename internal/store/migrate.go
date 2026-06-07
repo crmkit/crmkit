@@ -95,6 +95,21 @@ var migrations = []Migration{
 	{Version: 6, Name: "workspace timezone", Statements: []string{
 		`ALTER TABLE workspaces ADD COLUMN timezone TEXT NOT NULL DEFAULT 'UTC'`,
 	}},
+	// v7 (2026-06-07): tags on companies (contacts already have them), so records
+	// can be grouped - e.g. "competitor", "watchlist", "portfolio". Stored as a
+	// JSON array string, mirroring contact tags; the query layer filters by
+	// membership. Existing rows keep a NULL (empty) tag set.
+	{Version: 7, Name: "company tags", Statements: []string{
+		`ALTER TABLE companies ADD COLUMN tags TEXT`,
+	}},
+	// v8 (2026-06-07): richer company records. notes is a first-class, searchable
+	// long-text field (companies previously only had name/domain). activities gain
+	// company_id so interactions/observations can be logged against a company - a
+	// monitoring timeline, not just contacts and deals. Existing rows keep NULLs.
+	{Version: 8, Name: "company notes and activities", Statements: []string{
+		`ALTER TABLE companies ADD COLUMN notes TEXT`,
+		`ALTER TABLE activities ADD COLUMN company_id TEXT`,
+	}},
 }
 
 // MigrationState reports how the database's schema compares to the code.

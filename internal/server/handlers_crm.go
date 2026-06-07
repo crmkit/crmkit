@@ -139,7 +139,7 @@ func (s *Server) handleGetContact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Best-effort activity summary; a stats hiccup must not fail the fetch.
-	if n, last, err := s.store.ActivityStats(sess.WorkspaceID, c.ID, ""); err == nil {
+	if n, last, err := s.store.ActivityStats(sess.WorkspaceID, c.ID, "", ""); err == nil {
 		c.ActivityCount = n
 		if !last.IsZero() {
 			c.LastActivityAt = &last
@@ -195,7 +195,7 @@ func (s *Server) handleListContactActivities(w http.ResponseWriter, r *http.Requ
 	sess := sessionFrom(r)
 	id := r.PathValue("id")
 	limit := render.Int(r.URL.Query().Get("limit"), 50)
-	list, err := s.store.ListActivities(sess.WorkspaceID, id, "", limit)
+	list, err := s.store.ListActivities(sess.WorkspaceID, id, "", "", limit)
 	if err != nil {
 		s.serverErr(w, r)
 		return
@@ -225,6 +225,43 @@ func (s *Server) handleCreateContactActivity(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	s.audit(sess, "activity.create", protocol.Handle(protocol.KindActivity, a.ID), a.Kind)
+	render.Respond(w, r, http.StatusCreated, a, render.ActivityLine(a))
+}
+
+func (s *Server) handleListCompanyActivities(w http.ResponseWriter, r *http.Request) {
+	sess := sessionFrom(r)
+	id := r.PathValue("id")
+	limit := render.Int(r.URL.Query().Get("limit"), 50)
+	list, err := s.store.ListActivities(sess.WorkspaceID, "", "", id, limit)
+	if err != nil {
+		s.serverErr(w, r)
+		return
+	}
+	list = localizedSlice(list, locationOf(sess))
+	s.respondList(w, r, list, render.Activities(list), "")
+}
+
+func (s *Server) handleCreateCompanyActivity(w http.ResponseWriter, r *http.Request) {
+	sess := sessionFrom(r)
+	id := r.PathValue("id")
+	var a protocol.Activity
+	if err := decodeJSON(r, &a); err != nil {
+		render.Error(w, r, http.StatusBadRequest, "bad_request",
+			`Send JSON, e.g. {"kind":"note","body":"Launched a WhatsApp agent"}. kind is one of note|call|email|meeting|task.`)
+		return
+	}
+	if strings.TrimSpace(a.Body) == "" {
+		render.Error(w, r, http.StatusBadRequest, "missing_field", `"body" is required to log an activity.`)
+		return
+	}
+	a.CompanyID = id
+	a.CreatedBy = sess.Email
+	if err := s.store.CreateActivity(sess.WorkspaceID, &a); err != nil {
+		s.serverErr(w, r)
+		return
+	}
+	s.audit(sess, "activity.create", protocol.Handle(protocol.KindActivity, a.ID), a.Kind)
+	a = a.Localized(locationOf(sess))
 	render.Respond(w, r, http.StatusCreated, a, render.ActivityLine(a))
 }
 
@@ -319,6 +356,13 @@ func (s *Server) handleGetCompany(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		s.serverErr(w, r)
 		return
+	}
+	// Best-effort activity summary; a stats hiccup must not fail the fetch.
+	if n, last, err := s.store.ActivityStats(sess.WorkspaceID, "", "", c.ID); err == nil {
+		c.ActivityCount = n
+		if !last.IsZero() {
+			c.LastActivityAt = &last
+		}
 	}
 	c = c.Localized(locationOf(sess))
 	render.Respond(w, r, http.StatusOK, c, render.Company(c))
@@ -420,7 +464,7 @@ func (s *Server) handleGetDeal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Best-effort activity summary; a stats hiccup must not fail the fetch.
-	if n, last, err := s.store.ActivityStats(sess.WorkspaceID, "", d.ID); err == nil {
+	if n, last, err := s.store.ActivityStats(sess.WorkspaceID, "", d.ID, ""); err == nil {
 		d.ActivityCount = n
 		if !last.IsZero() {
 			d.LastActivityAt = &last
@@ -496,7 +540,7 @@ func (s *Server) handleListReminders(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleListActivities(w http.ResponseWriter, r *http.Request) {
 	sess := sessionFrom(r)
 	q := r.URL.Query()
-	list, err := s.store.ListActivities(sess.WorkspaceID, q.Get("contact"), q.Get("deal"), render.Int(q.Get("limit"), 50))
+	list, err := s.store.ListActivities(sess.WorkspaceID, q.Get("contact"), q.Get("deal"), q.Get("company"), render.Int(q.Get("limit"), 50))
 	if err != nil {
 		s.serverErr(w, r)
 		return

@@ -153,13 +153,17 @@ func (s *sqlStore) CreateCompany(ws string, c *protocol.Company) error {
 	if err != nil {
 		return err
 	}
+	tags, err := marshalTags(c.Tags)
+	if err != nil {
+		return err
+	}
 	_, err = s.exec(`
-INSERT INTO companies (id, workspace_id, name, domain, custom, created_at, updated_at, created_by)
-VALUES (?,?,?,?,?,?,?,?)`, c.ID, ws, c.Name, c.Domain, custom, unix(now), unix(now), c.CreatedBy)
+INSERT INTO companies (id, workspace_id, name, domain, tags, notes, custom, created_at, updated_at, created_by)
+VALUES (?,?,?,?,?,?,?,?,?,?)`, c.ID, ws, c.Name, c.Domain, tags, c.Notes, custom, unix(now), unix(now), c.CreatedBy)
 	return err
 }
 
-const companyColumns = `id, name, domain, custom, created_at, updated_at, created_by`
+const companyColumns = `id, name, domain, tags, notes, custom, created_at, updated_at, created_by`
 
 // GetCompany loads one company scoped to the workspace.
 func (s *sqlStore) GetCompany(ws, id string) (protocol.Company, error) {
@@ -194,8 +198,12 @@ func (s *sqlStore) UpdateCompany(ws string, c *protocol.Company) error {
 	if err != nil {
 		return err
 	}
-	res, err := s.exec(`UPDATE companies SET name=?, domain=?, custom=?, updated_at=? WHERE workspace_id = ? AND id = ?`,
-		c.Name, c.Domain, custom, unix(c.UpdatedAt), ws, c.ID)
+	tags, err := marshalTags(c.Tags)
+	if err != nil {
+		return err
+	}
+	res, err := s.exec(`UPDATE companies SET name=?, domain=?, tags=?, notes=?, custom=?, updated_at=? WHERE workspace_id = ? AND id = ?`,
+		c.Name, c.Domain, tags, c.Notes, custom, unix(c.UpdatedAt), ws, c.ID)
 	if err != nil {
 		return err
 	}
@@ -215,10 +223,11 @@ func scanCompany(sc scanner) (protocol.Company, error) {
 	var (
 		c              protocol.Company
 		domain, custom sql.NullString
+		tags, notes    sql.NullString
 		createdBy      sql.NullString
 		created, upd   int64
 	)
-	err := sc.Scan(&c.ID, &c.Name, &domain, &custom, &created, &upd, &createdBy)
+	err := sc.Scan(&c.ID, &c.Name, &domain, &tags, &notes, &custom, &created, &upd, &createdBy)
 	if errors.Is(err, sql.ErrNoRows) {
 		return protocol.Company{}, ErrNotFound
 	}
@@ -226,6 +235,8 @@ func scanCompany(sc scanner) (protocol.Company, error) {
 		return protocol.Company{}, err
 	}
 	c.Domain = domain.String
+	c.Tags = unmarshalTags(tags.String)
+	c.Notes = notes.String
 	c.Custom = unmarshalCustom(custom.String)
 	c.CreatedAt, c.UpdatedAt = fromUnix(created), fromUnix(upd)
 	c.CreatedBy = createdBy.String
@@ -422,20 +433,20 @@ func (s *sqlStore) CreateActivity(ws string, a *protocol.Activity) error {
 	}
 	a.CreatedAt = now
 	_, err := s.exec(`
-INSERT INTO activities (id, workspace_id, contact_id, deal_id, kind, body, created_by, created_at)
-VALUES (?,?,?,?,?,?,?,?)`, a.ID, ws, a.ContactID, a.DealID, a.Kind, a.Body, a.CreatedBy, unix(now))
+INSERT INTO activities (id, workspace_id, contact_id, deal_id, company_id, kind, body, created_by, created_at)
+VALUES (?,?,?,?,?,?,?,?,?)`, a.ID, ws, a.ContactID, a.DealID, a.CompanyID, a.Kind, a.Body, a.CreatedBy, unix(now))
 	return err
 }
 
 // ListActivities returns activities for a workspace, optionally filtered by
-// contact or deal, newest first.
-func (s *sqlStore) ListActivities(ws, contactID, dealID string, limit int) ([]protocol.Activity, error) {
+// contact, deal, or company, newest first.
+func (s *sqlStore) ListActivities(ws, contactID, dealID, companyID string, limit int) ([]protocol.Activity, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 50
 	}
 	args := []any{ws}
 	sb := strings.Builder{}
-	sb.WriteString(`SELECT id, contact_id, deal_id, kind, body, created_by, created_at FROM activities WHERE workspace_id = ?`)
+	sb.WriteString(`SELECT id, contact_id, deal_id, company_id, kind, body, created_by, created_at FROM activities WHERE workspace_id = ?`)
 	if contactID != "" {
 		sb.WriteString(` AND contact_id = ?`)
 		args = append(args, contactID)
@@ -443,6 +454,10 @@ func (s *sqlStore) ListActivities(ws, contactID, dealID string, limit int) ([]pr
 	if dealID != "" {
 		sb.WriteString(` AND deal_id = ?`)
 		args = append(args, dealID)
+	}
+	if companyID != "" {
+		sb.WriteString(` AND company_id = ?`)
+		args = append(args, companyID)
 	}
 	sb.WriteString(` ORDER BY created_at DESC LIMIT ?`)
 	args = append(args, limit)
@@ -456,14 +471,14 @@ func (s *sqlStore) ListActivities(ws, contactID, dealID string, limit int) ([]pr
 	out := []protocol.Activity{} // non-nil so an empty list serializes as [] not null
 	for rows.Next() {
 		var (
-			a                        protocol.Activity
-			contact, deal, createdBy sql.NullString
-			created                  int64
+			a                                 protocol.Activity
+			contact, deal, company, createdBy sql.NullString
+			created                           int64
 		)
-		if err := rows.Scan(&a.ID, &contact, &deal, &a.Kind, &a.Body, &createdBy, &created); err != nil {
+		if err := rows.Scan(&a.ID, &contact, &deal, &company, &a.Kind, &a.Body, &createdBy, &created); err != nil {
 			return nil, err
 		}
-		a.ContactID, a.DealID, a.CreatedBy = contact.String, deal.String, createdBy.String
+		a.ContactID, a.DealID, a.CompanyID, a.CreatedBy = contact.String, deal.String, company.String, createdBy.String
 		a.CreatedAt = fromUnix(created)
 		out = append(out, a)
 	}
@@ -473,7 +488,7 @@ func (s *sqlStore) ListActivities(ws, contactID, dealID string, limit int) ([]pr
 // ActivityStats returns the activity count and most-recent activity time for a
 // contact or deal (whichever id is non-empty) - used to annotate a single-record
 // fetch. Returns 0 + zero time when there are none.
-func (s *sqlStore) ActivityStats(ws, contactID, dealID string) (int, time.Time, error) {
+func (s *sqlStore) ActivityStats(ws, contactID, dealID, companyID string) (int, time.Time, error) {
 	args := []any{ws}
 	sb := strings.Builder{}
 	sb.WriteString(`SELECT count(*), coalesce(max(created_at), 0) FROM activities WHERE workspace_id = ?`)
@@ -484,6 +499,10 @@ func (s *sqlStore) ActivityStats(ws, contactID, dealID string) (int, time.Time, 
 	if dealID != "" {
 		sb.WriteString(` AND deal_id = ?`)
 		args = append(args, dealID)
+	}
+	if companyID != "" {
+		sb.WriteString(` AND company_id = ?`)
+		args = append(args, companyID)
 	}
 	var (
 		count int
