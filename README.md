@@ -9,6 +9,29 @@ by design - no UI, no SDK - just a plain-text, grepable API and a one-page
 operating manual the agent loads. The agent (ChatGPT, Claude, Cursor, …) _is_
 the interface.
 
+## Why crmkit exists
+
+A CRM looks like something an agent could just keep in a few markdown files or a
+scratch database table. That holds right up until it doesn't. Underneath, a CRM
+is a pile of small problems that are each easy to get subtly wrong and painful to
+fix once real data has piled up:
+
+- stable IDs that survive renames and re-imports,
+- relations between contacts, companies, and deals that stay consistent,
+- search, filtering, and pagination that hold up as records grow,
+- dedupe, validation, and safe concurrent writes,
+- history, audit, and per-tenant limits,
+- schema changes you can apply to a live database without losing data.
+
+And a CRM is rarely driven by one agent. Several agents - and the teammates
+alongside them - work the same records at the same time, so you need one shared
+system of record: consistent reads, safe concurrent writes, and a clear trail of
+which agent or member did what. Files and ad-hoc tables fall apart exactly here.
+
+crmkit is that core - one well-maintained, battle-tested foundation that many
+agents and deployments share, so you build on solved problems instead of
+rediscovering them ad hoc in every project.
+
 ## Why it looks the way it does
 
 - **Plain text by default, JSON on demand.** Responses are one labeled,
