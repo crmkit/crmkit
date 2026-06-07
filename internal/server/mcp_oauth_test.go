@@ -250,7 +250,7 @@ func TestOAuthToMCPEndToEnd(t *testing.T) {
 	// 8) request POST /contacts returns the plain-text record verbatim.
 	call := `{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"request","arguments":{"method":"POST","path":"/contacts","body":{"name":"Jane Doe","email":"jane@acme.com","stage":"lead"}}}}`
 	status, body = do(t, ts, "POST", "/mcp", access, call)
-	if status != 200 || !strings.Contains(body, "contact/c_") || !strings.Contains(body, "Jane Doe") {
+	if status != 200 || !strings.Contains(body, "contact_") || !strings.Contains(body, "Jane Doe") {
 		t.Fatalf("tools/call: %d %q", status, body)
 	}
 	if strings.Contains(body, `"isError":true`) {
@@ -510,7 +510,7 @@ func TestMCPRequestTool(t *testing.T) {
 	// Allowed write (with a body) and a query string.
 	status, body = do(t, ts, "POST", "/mcp", token,
 		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"request","arguments":{"method":"POST","path":"/contacts","body":{"name":"Leia"}}}}`)
-	if status != 200 || !strings.Contains(body, "contact/c_") || strings.Contains(body, `"isError":true`) {
+	if status != 200 || !strings.Contains(body, "contact_") || strings.Contains(body, `"isError":true`) {
 		t.Fatalf("request POST /contacts: %d %q", status, body)
 	}
 

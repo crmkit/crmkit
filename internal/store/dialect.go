@@ -40,6 +40,18 @@ func (d dialect) jsonText(column, key string) (expr, arg string) {
 	return "json_extract(" + column + ", ?)", "$." + key
 }
 
+// isUniqueViolation reports whether err is a unique-constraint violation, on
+// either backend. It backs handle generation's retry-on-collision. Matched on
+// the driver error text to avoid importing backend-specific error types.
+func isUniqueViolation(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "UNIQUE constraint failed") || // modernc sqlite
+		strings.Contains(msg, "SQLSTATE 23505") // pgx unique_violation
+}
+
 // rebind converts "?" placeholders to the dialect's form. For SQLite it is a
 // no-op; for Postgres it numbers them $1, $2, … in order of appearance. Our SQL
 // never contains a literal "?", so a straight scan is safe.

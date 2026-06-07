@@ -20,9 +20,10 @@ AUTH: send the header Authorization: Bearer <token> on every request.
 FORMAT: responses are plain text by default (one labeled line per record).
 Add the header Accept: application/json (or ?format=json) for JSON.
 
-Records are addressed by a stable handle like contact/c_ab12... - reuse that
-handle (or the bare id after the slash) in later calls. You can grep responses:
-each line stands alone.
+Records are addressed by a short, stable handle like contact_k7m2q - reuse that
+handle in later calls (in a path, use it as the {id}, e.g. GET /contacts/k7m2q
+or GET /contacts/contact_k7m2q; both work). Relations are shown the same way
+(company=company_x7k2). You can grep responses: each line stands alone.
 
 ## CONNECTING (pick your client)
 

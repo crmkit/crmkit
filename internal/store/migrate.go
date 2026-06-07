@@ -116,6 +116,27 @@ var migrations = []Migration{
 	{Version: 9, Name: "audit created_at index", Statements: []string{
 		`CREATE INDEX IF NOT EXISTS idx_audit_log_created_at ON audit_log(created_at)`,
 	}},
+	// v10 (2026-06-07): short, workspace-scoped public handles. Each record keeps
+	// its opaque global id (PK, FK target) and gains a short `handle` that agents
+	// address it by - fewer tokens, easier to reference. The handle is stored
+	// bare; presentation (any prefix) is applied at the API edge. Uniqueness is
+	// per (workspace, kind) via the unique index, with retry-on-collision at
+	// insert. Existing rows are backfilled handle=id (valid, just long) before the
+	// index is built; new rows get a generated short handle.
+	{Version: 10, Name: "record handles", Statements: []string{
+		`ALTER TABLE contacts ADD COLUMN handle TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE companies ADD COLUMN handle TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE deals ADD COLUMN handle TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE activities ADD COLUMN handle TEXT NOT NULL DEFAULT ''`,
+		`UPDATE contacts SET handle = id WHERE handle = ''`,
+		`UPDATE companies SET handle = id WHERE handle = ''`,
+		`UPDATE deals SET handle = id WHERE handle = ''`,
+		`UPDATE activities SET handle = id WHERE handle = ''`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_contacts_ws_handle ON contacts(workspace_id, handle)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_companies_ws_handle ON companies(workspace_id, handle)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_deals_ws_handle ON deals(workspace_id, handle)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_activities_ws_handle ON activities(workspace_id, handle)`,
+	}},
 }
 
 // MigrationState reports how the database's schema compares to the code.

@@ -35,6 +35,10 @@ type Store interface {
 	SetDefaultPlan(name string)
 	Ping(ctx context.Context) error
 
+	// ResolveHandle maps a public reference (short handle in any representation, or
+	// a raw internal id) to the internal id for a kind within a workspace.
+	ResolveHandle(workspaceID, kind, ref string) (string, error)
+
 	// plans & quotas
 	WorkspacePlan(workspaceID string) (string, error)
 	UserPlan(userID string) (string, error)

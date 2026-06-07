@@ -1,7 +1,8 @@
 // Package protocol defines the core CRM domain types shared between the
-// storage layer, the HTTP server, and the rendering layer. Every entity is
-// addressed by a stable, prefixed handle (e.g. "contact/c_3f9a...") that
-// agents thread through follow-up calls.
+// storage layer, the HTTP server, and the rendering layer. Every entity carries
+// an opaque global id (the durable PK/FK key) and a short, workspace-scoped
+// handle (e.g. "contact_k7m2q") that agents thread through follow-up calls. See
+// NewHandle / FormatRef / ParseRef.
 package protocol
 
 import (
@@ -36,7 +37,9 @@ func NewID(prefix string) string {
 	return prefix + "_" + idEncoding.EncodeToString(buf)
 }
 
-// Handle returns the "kind/id" reference token for an entity.
+// Handle returns the "kind/id" reference token for an entity. It is used for
+// internal, durable references (e.g. audit-log targets) that point at the
+// opaque global id. Agent-facing references use FormatRef over the short handle.
 func Handle(kind, id string) string {
 	return kind + "/" + id
 }
@@ -48,6 +51,56 @@ func SplitHandle(handle string) (kind, id string) {
 		return handle[:i], handle[i+1:]
 	}
 	return "", handle
+}
+
+// handleLen is the length of a generated handle body. Handles are scoped to a
+// (workspace, kind), so this small space is ample - collisions are rare and
+// resolved by retry on insert. Shorter = fewer tokens for the agent.
+const handleLen = 5
+
+// NewHandle returns a short, random reference body (no prefix, e.g. "k7m2q").
+// This is the public id an agent sees and threads through calls; it is stored
+// bare. Uniqueness is per (workspace, kind), enforced by a unique index plus
+// retry-on-collision at insert. The wire representation (any prefix/separator)
+// is applied at the edge by FormatRef and is never stored.
+func NewHandle() string {
+	// 256 is a multiple of 32, so indexing the alphabet by a random byte is bias-free.
+	buf := make([]byte, handleLen)
+	if _, err := rand.Read(buf); err != nil {
+		t := time.Now().UnixNano()
+		for i := range buf {
+			buf[i] = byte(t >> (uint(i) * 8))
+		}
+	}
+	const alpha = "abcdefghijkmnpqrstuvwxyz23456789"
+	for i := range buf {
+		buf[i] = alpha[int(buf[i])%len(alpha)]
+	}
+	return string(buf)
+}
+
+// FormatRef renders a stored bare handle as the agent-facing reference, e.g.
+// FormatRef("contact", "k7m2q") -> "contact_k7m2q". This is the single place the
+// wire representation is decided; change it (to "contact/", bare, etc.) without
+// touching storage. Empty handle yields "" so the field is omitted.
+func FormatRef(kind, handle string) string {
+	if handle == "" {
+		return ""
+	}
+	return kind + "_" + handle
+}
+
+// ParseRef normalizes any reference an agent sends back to the bare handle. It
+// accepts every representation (contact_k7m2q, contact/k7m2q, bare k7m2q): the
+// handle body contains no separator, so it is the suffix after the last '/' or
+// '_'. An opaque internal id (e.g. "c_3f9a…") also contains '_', so callers that
+// must accept either match the bare result against handle AND the raw input
+// against id (see store.ResolveHandle).
+func ParseRef(input string) string {
+	if i := strings.LastIndexAny(input, "/_"); i >= 0 {
+		return input[i+1:]
+	}
+	return input
 }
 
 // Workspace is a tenant. The first successful login for an email address
@@ -115,19 +168,23 @@ type Session struct {
 
 // Contact is a person in the CRM.
 type Contact struct {
-	ID        string `json:"id"`
+	ID string `json:"id"`
+	// Handle is the short, workspace-scoped public reference (bare, e.g. "k7m2q").
+	// Agents address the record by this; ID is the durable opaque global key.
+	Handle    string `json:"handle,omitempty"`
 	Name      string `json:"name"`
 	Email     string `json:"email,omitempty"`
 	Phone     string `json:"phone,omitempty"`
 	CompanyID string `json:"company_id,omitempty"`
-	// CompanyName is the resolved name of CompanyID, populated on read for
-	// display (never persisted). Empty if the contact has no company.
-	CompanyName string         `json:"company_name,omitempty"`
-	Owner       string         `json:"owner,omitempty"`
-	Stage       string         `json:"stage,omitempty"`
-	Tags        []string       `json:"tags,omitempty"`
-	Notes       string         `json:"notes,omitempty"`
-	Custom      map[string]any `json:"custom,omitempty"`
+	// CompanyName / CompanyHandle are the resolved name and public handle of
+	// CompanyID, populated on read for display (never persisted).
+	CompanyName   string         `json:"company_name,omitempty"`
+	CompanyHandle string         `json:"company_handle,omitempty"`
+	Owner         string         `json:"owner,omitempty"`
+	Stage         string         `json:"stage,omitempty"`
+	Tags          []string       `json:"tags,omitempty"`
+	Notes         string         `json:"notes,omitempty"`
+	Custom        map[string]any `json:"custom,omitempty"`
 	// FollowUpAt is when this contact should next be followed up (RFC3339).
 	// Send null to clear it. Agents read due/overdue items via GET /reminders.
 	FollowUpAt   *time.Time `json:"follow_up_at,omitempty"`
@@ -147,6 +204,7 @@ type Contact struct {
 // Company is an organization that contacts and deals belong to.
 type Company struct {
 	ID        string         `json:"id"`
+	Handle    string         `json:"handle,omitempty"` // short public reference; see Contact.Handle
 	Name      string         `json:"name"`
 	Domain    string         `json:"domain,omitempty"`
 	Tags      []string       `json:"tags,omitempty"`
@@ -165,18 +223,22 @@ type Company struct {
 // Deal is an opportunity moving through a pipeline.
 type Deal struct {
 	ID        string `json:"id"`
+	Handle    string `json:"handle,omitempty"` // short public reference; see Contact.Handle
 	Title     string `json:"title"`
 	ContactID string `json:"contact_id,omitempty"`
 	CompanyID string `json:"company_id,omitempty"`
-	// ContactName / CompanyName are the resolved names of ContactID / CompanyID,
-	// populated on read for display (never persisted).
-	ContactName string         `json:"contact_name,omitempty"`
-	CompanyName string         `json:"company_name,omitempty"`
-	AmountCents int64          `json:"amount_cents,omitempty"`
-	Currency    string         `json:"currency,omitempty"`
-	Stage       string         `json:"stage,omitempty"`
-	Status      string         `json:"status,omitempty"` // open | won | lost
-	Custom      map[string]any `json:"custom,omitempty"`
+	// ContactName/CompanyName and ContactHandle/CompanyHandle are the resolved
+	// names and public handles of ContactID/CompanyID, populated on read (never
+	// persisted).
+	ContactName   string         `json:"contact_name,omitempty"`
+	CompanyName   string         `json:"company_name,omitempty"`
+	ContactHandle string         `json:"contact_handle,omitempty"`
+	CompanyHandle string         `json:"company_handle,omitempty"`
+	AmountCents   int64          `json:"amount_cents,omitempty"`
+	Currency      string         `json:"currency,omitempty"`
+	Stage         string         `json:"stage,omitempty"`
+	Status        string         `json:"status,omitempty"` // open | won | lost
+	Custom        map[string]any `json:"custom,omitempty"`
 	// FollowUpAt is when this deal should next be advanced (RFC3339). Send null
 	// to clear it. Agents read due/overdue items via GET /reminders.
 	FollowUpAt   *time.Time `json:"follow_up_at,omitempty"`
@@ -208,14 +270,20 @@ type Reminder struct {
 // Activity is a logged interaction (note, call, email, meeting) attached to a
 // contact and optionally a deal.
 type Activity struct {
-	ID        string    `json:"id"`
-	ContactID string    `json:"contact_id,omitempty"`
-	DealID    string    `json:"deal_id,omitempty"`
-	CompanyID string    `json:"company_id,omitempty"`
-	Kind      string    `json:"kind"` // note | call | email | meeting | task
-	Body      string    `json:"body"`
-	CreatedBy string    `json:"created_by,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
+	ID        string `json:"id"`
+	Handle    string `json:"handle,omitempty"` // short public reference; see Contact.Handle
+	ContactID string `json:"contact_id,omitempty"`
+	DealID    string `json:"deal_id,omitempty"`
+	CompanyID string `json:"company_id,omitempty"`
+	// ContactHandle/DealHandle/CompanyHandle are the resolved public handles of
+	// the relation ids, populated on read for display (never persisted).
+	ContactHandle string    `json:"contact_handle,omitempty"`
+	DealHandle    string    `json:"deal_handle,omitempty"`
+	CompanyHandle string    `json:"company_handle,omitempty"`
+	Kind          string    `json:"kind"` // note | call | email | meeting | task
+	Body          string    `json:"body"`
+	CreatedBy     string    `json:"created_by,omitempty"`
+	CreatedAt     time.Time `json:"created_at"`
 }
 
 // ---- timezone-aware display -------------------------------------------------

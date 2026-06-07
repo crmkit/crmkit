@@ -37,8 +37,9 @@ rediscovering them ad hoc in every project.
 - **Plain text by default, JSON on demand.** Responses are one labeled,
   grepable line per record. Add `Accept: application/json` (or `?format=json`)
   for JSON. Plain text is token-cheap and survives context truncation.
-- **Stable handles.** Every record is addressed by `kind/id`
-  (e.g. `contact/c_ab12…`) that the agent threads through follow-up calls.
+- **Short, stable handles.** Every record is addressed by a short workspace-
+  scoped handle (e.g. `contact_k7m2q`) that the agent threads through follow-up
+  calls - token-cheap and easy to reference.
 - **Instructive errors.** Every 4xx returns a `hint` telling the agent what to
   do next - it self-corrects without a schema to lean on.
 - **OTP auth, bearer tokens.** First login emails a 6-digit code; verifying it

@@ -78,7 +78,7 @@ func TestCompanyActivities(t *testing.T) {
 	}
 
 	// It's listed under the company...
-	if _, b := do(t, ts, "GET", "/companies/"+id+"/activities", token, ""); !strings.Contains(b, "Raised a seed round") || !strings.Contains(b, "company="+id) {
+	if _, b := do(t, ts, "GET", "/companies/"+id+"/activities", token, ""); !strings.Contains(b, "Raised a seed round") || !strings.Contains(b, "company=company_"+id) {
 		t.Fatalf("company activity list missing the entry:\n%s", b)
 	}
 	// ...and via the global feed filtered by company.

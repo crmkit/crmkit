@@ -120,6 +120,13 @@ func authenticate(t *testing.T, ts *httptest.Server) string {
 
 func firstHandleID(body, prefix string) string {
 	i := strings.Index(body, prefix)
+	if i < 0 && strings.HasSuffix(prefix, "/") {
+		// CRM records now render as "kind_<handle>" (members/workspaces/audit keep
+		// "kind/"). Fall back to the new separator; the returned bare handle works
+		// directly as a path id (the server resolves it).
+		prefix = strings.TrimSuffix(prefix, "/") + "_"
+		i = strings.Index(body, prefix)
+	}
 	if i < 0 {
 		return ""
 	}
@@ -211,7 +218,7 @@ func TestFullContactFlowPlainText(t *testing.T) {
 	if status != http.StatusCreated {
 		t.Fatalf("create contact: %d %q", status, body)
 	}
-	if !strings.Contains(body, "contact/c_") || !strings.Contains(body, "Jane Doe") {
+	if !strings.Contains(body, "contact_") || !strings.Contains(body, "Jane Doe") {
 		t.Fatalf("unexpected create body: %q", body)
 	}
 
