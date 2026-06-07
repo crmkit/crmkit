@@ -3,12 +3,60 @@ package store
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/crmkit/crmkit/internal/protocol"
 )
+
+// handleTable maps an entity kind to its table, for handle resolution. The
+// table names are code-controlled (never user input), so they are safe to
+// interpolate into SQL.
+var handleTable = map[string]string{
+	protocol.KindContact:  "contacts",
+	protocol.KindCompany:  "companies",
+	protocol.KindDeal:     "deals",
+	protocol.KindActivity: "activities",
+}
+
+// genHandle runs insert(handle) with a freshly generated short handle, retrying
+// on the rare per-(workspace,kind) collision (the unique index rejects a dup).
+// It returns the handle that stuck.
+func (s *sqlStore) genHandle(insert func(handle string) error) (string, error) {
+	var err error
+	for attempt := 0; attempt < 5; attempt++ {
+		h := protocol.NewHandle()
+		if err = insert(h); err == nil {
+			return h, nil
+		}
+		if !isUniqueViolation(err) {
+			return "", err
+		}
+	}
+	return "", fmt.Errorf("crmkit: could not allocate a unique handle: %w", err)
+}
+
+// ResolveHandle maps a public reference for a kind to the internal id within a
+// workspace. It accepts either a handle (in any representation - normalized via
+// protocol.ParseRef) or a raw internal id, returning ErrNotFound if neither
+// matches. The handle is matched on the normalized value and the id on the raw
+// input, so an internal id (which also contains '_') still resolves.
+func (s *sqlStore) ResolveHandle(ws, kind, ref string) (string, error) {
+	table, ok := handleTable[kind]
+	if !ok {
+		return "", ErrNotFound
+	}
+	var id string
+	err := s.queryRow(
+		`SELECT id FROM `+table+` WHERE workspace_id = ? AND (handle = ? OR id = ?) LIMIT 1`,
+		ws, protocol.ParseRef(ref), ref).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	return id, err
+}
 
 // ---- contacts ------------------------------------------------------------
 
@@ -28,18 +76,21 @@ func (s *sqlStore) CreateContact(ws string, c *protocol.Contact) error {
 	if err != nil {
 		return err
 	}
-	_, err = s.exec(`
-INSERT INTO contacts (id, workspace_id, name, email, phone, company_id, owner, stage, tags, notes, custom, follow_up_at, follow_up_note, created_at, updated_at, created_by)
-VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		c.ID, ws, c.Name, c.Email, c.Phone, c.CompanyID, c.Owner, c.Stage, tags, c.Notes, custom,
-		nullableUnix(c.FollowUpAt), c.FollowUpNote, unix(now), unix(now), c.CreatedBy)
+	c.Handle, err = s.genHandle(func(handle string) error {
+		_, e := s.exec(`
+INSERT INTO contacts (id, workspace_id, handle, name, email, phone, company_id, owner, stage, tags, notes, custom, follow_up_at, follow_up_note, created_at, updated_at, created_by)
+VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			c.ID, ws, handle, c.Name, c.Email, c.Phone, c.CompanyID, c.Owner, c.Stage, tags, c.Notes, custom,
+			nullableUnix(c.FollowUpAt), c.FollowUpNote, unix(now), unix(now), c.CreatedBy)
+		return e
+	})
 	if err != nil {
 		return err
 	}
 	return s.fillContactRef(ws, c)
 }
 
-const contactColumns = `id, name, email, phone, company_id, owner, stage, tags, notes, custom, follow_up_at, follow_up_note, created_at, updated_at, created_by`
+const contactColumns = `id, handle, name, email, phone, company_id, owner, stage, tags, notes, custom, follow_up_at, follow_up_note, created_at, updated_at, created_by`
 
 // GetContact loads one contact scoped to the workspace.
 func (s *sqlStore) GetContact(ws, id string) (protocol.Contact, error) {
@@ -121,7 +172,7 @@ func scanContact(sc scanner) (protocol.Contact, error) {
 		followAt           sql.NullInt64
 		createdAt, updated int64
 	)
-	err := sc.Scan(&c.ID, &c.Name, &email, &phone, &companyID, &owner, &stage, &tags, &notes, &custom, &followAt, &followNote, &createdAt, &updated, &createdBy)
+	err := sc.Scan(&c.ID, &c.Handle, &c.Name, &email, &phone, &companyID, &owner, &stage, &tags, &notes, &custom, &followAt, &followNote, &createdAt, &updated, &createdBy)
 	if errors.Is(err, sql.ErrNoRows) {
 		return protocol.Contact{}, ErrNotFound
 	}
@@ -157,13 +208,16 @@ func (s *sqlStore) CreateCompany(ws string, c *protocol.Company) error {
 	if err != nil {
 		return err
 	}
-	_, err = s.exec(`
-INSERT INTO companies (id, workspace_id, name, domain, tags, notes, custom, created_at, updated_at, created_by)
-VALUES (?,?,?,?,?,?,?,?,?,?)`, c.ID, ws, c.Name, c.Domain, tags, c.Notes, custom, unix(now), unix(now), c.CreatedBy)
+	c.Handle, err = s.genHandle(func(handle string) error {
+		_, e := s.exec(`
+INSERT INTO companies (id, workspace_id, handle, name, domain, tags, notes, custom, created_at, updated_at, created_by)
+VALUES (?,?,?,?,?,?,?,?,?,?,?)`, c.ID, ws, handle, c.Name, c.Domain, tags, c.Notes, custom, unix(now), unix(now), c.CreatedBy)
+		return e
+	})
 	return err
 }
 
-const companyColumns = `id, name, domain, tags, notes, custom, created_at, updated_at, created_by`
+const companyColumns = `id, handle, name, domain, tags, notes, custom, created_at, updated_at, created_by`
 
 // GetCompany loads one company scoped to the workspace.
 func (s *sqlStore) GetCompany(ws, id string) (protocol.Company, error) {
@@ -227,7 +281,7 @@ func scanCompany(sc scanner) (protocol.Company, error) {
 		createdBy      sql.NullString
 		created, upd   int64
 	)
-	err := sc.Scan(&c.ID, &c.Name, &domain, &tags, &notes, &custom, &created, &upd, &createdBy)
+	err := sc.Scan(&c.ID, &c.Handle, &c.Name, &domain, &tags, &notes, &custom, &created, &upd, &createdBy)
 	if errors.Is(err, sql.ErrNoRows) {
 		return protocol.Company{}, ErrNotFound
 	}
@@ -259,18 +313,21 @@ func (s *sqlStore) CreateDeal(ws string, d *protocol.Deal) error {
 	if err != nil {
 		return err
 	}
-	_, err = s.exec(`
-INSERT INTO deals (id, workspace_id, title, contact_id, company_id, amount_cents, currency, stage, status, custom, follow_up_at, follow_up_note, created_at, updated_at, created_by)
-VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		d.ID, ws, d.Title, d.ContactID, d.CompanyID, d.AmountCents, d.Currency, d.Stage, d.Status, custom,
-		nullableUnix(d.FollowUpAt), d.FollowUpNote, unix(now), unix(now), d.CreatedBy)
+	d.Handle, err = s.genHandle(func(handle string) error {
+		_, e := s.exec(`
+INSERT INTO deals (id, workspace_id, handle, title, contact_id, company_id, amount_cents, currency, stage, status, custom, follow_up_at, follow_up_note, created_at, updated_at, created_by)
+VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			d.ID, ws, handle, d.Title, d.ContactID, d.CompanyID, d.AmountCents, d.Currency, d.Stage, d.Status, custom,
+			nullableUnix(d.FollowUpAt), d.FollowUpNote, unix(now), unix(now), d.CreatedBy)
+		return e
+	})
 	if err != nil {
 		return err
 	}
 	return s.fillDealRef(ws, d)
 }
 
-const dealColumns = `id, title, contact_id, company_id, amount_cents, currency, stage, status, custom, follow_up_at, follow_up_note, created_at, updated_at, created_by`
+const dealColumns = `id, handle, title, contact_id, company_id, amount_cents, currency, stage, status, custom, follow_up_at, follow_up_note, created_at, updated_at, created_by`
 
 // GetDeal loads one deal scoped to the workspace.
 func (s *sqlStore) GetDeal(ws, id string) (protocol.Deal, error) {
@@ -327,7 +384,7 @@ func scanDeal(sc scanner) (protocol.Deal, error) {
 		followAt                sql.NullInt64
 		created, upd            int64
 	)
-	err := sc.Scan(&d.ID, &d.Title, &contactID, &companyID, &amount, &currency, &stage, &status, &custom, &followAt, &followNote, &created, &upd, &createdBy)
+	err := sc.Scan(&d.ID, &d.Handle, &d.Title, &contactID, &companyID, &amount, &currency, &stage, &status, &custom, &followAt, &followNote, &created, &upd, &createdBy)
 	if errors.Is(err, sql.ErrNoRows) {
 		return protocol.Deal{}, ErrNotFound
 	}
@@ -358,7 +415,7 @@ func (s *sqlStore) ListReminders(ws string, until time.Time, limit int) ([]proto
 
 	// Contacts first; fully read and close before the deals query because the
 	// store may run on a single connection.
-	crows, err := s.query(`SELECT id, name, email, follow_up_at, follow_up_note FROM contacts
+	crows, err := s.query(`SELECT id, handle, name, email, follow_up_at, follow_up_note FROM contacts
 WHERE workspace_id = ? AND follow_up_at IS NOT NULL AND follow_up_at <= ? ORDER BY follow_up_at ASC LIMIT ?`,
 		ws, unix(until), limit)
 	if err != nil {
@@ -366,17 +423,17 @@ WHERE workspace_id = ? AND follow_up_at IS NOT NULL AND follow_up_at <= ? ORDER 
 	}
 	for crows.Next() {
 		var (
-			id, name    string
-			email, note sql.NullString
-			fa          int64
+			id, handle, name string
+			email, note      sql.NullString
+			fa               int64
 		)
-		if err := crows.Scan(&id, &name, &email, &fa, &note); err != nil {
+		if err := crows.Scan(&id, &handle, &name, &email, &fa, &note); err != nil {
 			crows.Close()
 			return nil, err
 		}
 		t := fromUnix(fa)
 		out = append(out, protocol.Reminder{
-			Handle: protocol.Handle(protocol.KindContact, id), Kind: protocol.KindContact,
+			Handle: protocol.FormatRef(protocol.KindContact, handle), Kind: protocol.KindContact,
 			Title: name, Email: email.String, FollowUpAt: t, Note: note.String, Overdue: t.Before(now),
 		})
 	}
@@ -385,7 +442,7 @@ WHERE workspace_id = ? AND follow_up_at IS NOT NULL AND follow_up_at <= ? ORDER 
 		return nil, err
 	}
 
-	drows, err := s.query(`SELECT id, title, follow_up_at, follow_up_note FROM deals
+	drows, err := s.query(`SELECT id, handle, title, follow_up_at, follow_up_note FROM deals
 WHERE workspace_id = ? AND follow_up_at IS NOT NULL AND follow_up_at <= ? ORDER BY follow_up_at ASC LIMIT ?`,
 		ws, unix(until), limit)
 	if err != nil {
@@ -393,17 +450,17 @@ WHERE workspace_id = ? AND follow_up_at IS NOT NULL AND follow_up_at <= ? ORDER 
 	}
 	for drows.Next() {
 		var (
-			id, title string
-			note      sql.NullString
-			fa        int64
+			id, handle, title string
+			note              sql.NullString
+			fa                int64
 		)
-		if err := drows.Scan(&id, &title, &fa, &note); err != nil {
+		if err := drows.Scan(&id, &handle, &title, &fa, &note); err != nil {
 			drows.Close()
 			return nil, err
 		}
 		t := fromUnix(fa)
 		out = append(out, protocol.Reminder{
-			Handle: protocol.Handle(protocol.KindDeal, id), Kind: protocol.KindDeal,
+			Handle: protocol.FormatRef(protocol.KindDeal, handle), Kind: protocol.KindDeal,
 			Title: title, FollowUpAt: t, Note: note.String, Overdue: t.Before(now),
 		})
 	}
@@ -432,9 +489,13 @@ func (s *sqlStore) CreateActivity(ws string, a *protocol.Activity) error {
 		a.Kind = "note"
 	}
 	a.CreatedAt = now
-	_, err := s.exec(`
-INSERT INTO activities (id, workspace_id, contact_id, deal_id, company_id, kind, body, created_by, created_at)
-VALUES (?,?,?,?,?,?,?,?,?)`, a.ID, ws, a.ContactID, a.DealID, a.CompanyID, a.Kind, a.Body, a.CreatedBy, unix(now))
+	var err error
+	a.Handle, err = s.genHandle(func(handle string) error {
+		_, e := s.exec(`
+INSERT INTO activities (id, workspace_id, handle, contact_id, deal_id, company_id, kind, body, created_by, created_at)
+VALUES (?,?,?,?,?,?,?,?,?,?)`, a.ID, ws, handle, a.ContactID, a.DealID, a.CompanyID, a.Kind, a.Body, a.CreatedBy, unix(now))
+		return e
+	})
 	return err
 }
 
@@ -456,7 +517,7 @@ func (s *sqlStore) ListActivities(ws, contactID, dealID, companyID string, limit
 	}
 	args := []any{ws}
 	sb := strings.Builder{}
-	sb.WriteString(`SELECT id, contact_id, deal_id, company_id, kind, body, created_by, created_at FROM activities WHERE workspace_id = ?`)
+	sb.WriteString(`SELECT id, handle, contact_id, deal_id, company_id, kind, body, created_by, created_at FROM activities WHERE workspace_id = ?`)
 	if contactID != "" {
 		sb.WriteString(` AND contact_id = ?`)
 		args = append(args, contactID)
@@ -485,14 +546,20 @@ func (s *sqlStore) ListActivities(ws, contactID, dealID, companyID string, limit
 			contact, deal, company, createdBy sql.NullString
 			created                           int64
 		)
-		if err := rows.Scan(&a.ID, &contact, &deal, &company, &a.Kind, &a.Body, &createdBy, &created); err != nil {
+		if err := rows.Scan(&a.ID, &a.Handle, &contact, &deal, &company, &a.Kind, &a.Body, &createdBy, &created); err != nil {
 			return nil, err
 		}
 		a.ContactID, a.DealID, a.CompanyID, a.CreatedBy = contact.String, deal.String, company.String, createdBy.String
 		a.CreatedAt = fromUnix(created)
 		out = append(out, a)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := s.fillActivityRefs(ws, out); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // ActivityStats returns the activity count and most-recent activity time for a
@@ -656,6 +723,52 @@ func (s *sqlStore) namesByID(ws, table string, ids []string) (map[string]string,
 	return out, rows.Err()
 }
 
+// handlesByID returns id -> public handle for rows of `table` within the
+// workspace, in one query. It mirrors namesByID and resolves relation ids to the
+// short handle so the render never has to surface an internal id. `table` is
+// code-controlled; ids are bound parameters.
+func (s *sqlStore) handlesByID(ws, table string, ids []string) (map[string]string, error) {
+	ids = distinctNonEmpty(ids)
+	out := make(map[string]string, len(ids))
+	if len(ids) == 0 {
+		return out, nil
+	}
+	ph := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
+	args := make([]any, 0, len(ids)+1)
+	args = append(args, ws)
+	for _, id := range ids {
+		args = append(args, id)
+	}
+	rows, err := s.query("SELECT id, handle FROM "+table+" WHERE workspace_id = ? AND id IN ("+ph+")", args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, handle string
+		if err := rows.Scan(&id, &handle); err != nil {
+			return nil, err
+		}
+		out[id] = protocol.FormatRef(kindForTable(table), handle)
+	}
+	return out, rows.Err()
+}
+
+// kindForTable maps a relation table back to its entity kind, so a resolved
+// handle can be formatted with the right prefix.
+func kindForTable(table string) string {
+	switch table {
+	case "contacts":
+		return protocol.KindContact
+	case "companies":
+		return protocol.KindCompany
+	case "deals":
+		return protocol.KindDeal
+	default:
+		return protocol.KindActivity
+	}
+}
+
 func distinctNonEmpty(in []string) []string {
 	seen := make(map[string]struct{}, len(in))
 	out := make([]string, 0, len(in))
@@ -684,8 +797,13 @@ func (s *sqlStore) fillContactRefs(ws string, contacts []protocol.Contact) error
 	if err != nil {
 		return err
 	}
+	handles, err := s.handlesByID(ws, "companies", ids)
+	if err != nil {
+		return err
+	}
 	for i := range contacts {
 		contacts[i].CompanyName = names[contacts[i].CompanyID]
+		contacts[i].CompanyHandle = handles[contacts[i].CompanyID]
 	}
 	return nil
 }
@@ -716,9 +834,19 @@ func (s *sqlStore) fillDealRefs(ws string, deals []protocol.Deal) error {
 	if err != nil {
 		return err
 	}
+	contactHandles, err := s.handlesByID(ws, "contacts", contactIDs)
+	if err != nil {
+		return err
+	}
+	companyHandles, err := s.handlesByID(ws, "companies", companyIDs)
+	if err != nil {
+		return err
+	}
 	for i := range deals {
 		deals[i].ContactName = contactNames[deals[i].ContactID]
 		deals[i].CompanyName = companyNames[deals[i].CompanyID]
+		deals[i].ContactHandle = contactHandles[deals[i].ContactID]
+		deals[i].CompanyHandle = companyHandles[deals[i].CompanyID]
 	}
 	return nil
 }
@@ -729,5 +857,37 @@ func (s *sqlStore) fillDealRef(ws string, d *protocol.Deal) error {
 		return err
 	}
 	*d = one[0]
+	return nil
+}
+
+// fillActivityRefs resolves each activity's contact/deal/company id to a public
+// handle (one query per relation kind across the page), so the render shows a
+// handle, never an internal id.
+func (s *sqlStore) fillActivityRefs(ws string, acts []protocol.Activity) error {
+	contactIDs := make([]string, 0, len(acts))
+	dealIDs := make([]string, 0, len(acts))
+	companyIDs := make([]string, 0, len(acts))
+	for _, a := range acts {
+		contactIDs = append(contactIDs, a.ContactID)
+		dealIDs = append(dealIDs, a.DealID)
+		companyIDs = append(companyIDs, a.CompanyID)
+	}
+	contactHandles, err := s.handlesByID(ws, "contacts", contactIDs)
+	if err != nil {
+		return err
+	}
+	dealHandles, err := s.handlesByID(ws, "deals", dealIDs)
+	if err != nil {
+		return err
+	}
+	companyHandles, err := s.handlesByID(ws, "companies", companyIDs)
+	if err != nil {
+		return err
+	}
+	for i := range acts {
+		acts[i].ContactHandle = contactHandles[acts[i].ContactID]
+		acts[i].DealHandle = dealHandles[acts[i].DealID]
+		acts[i].CompanyHandle = companyHandles[acts[i].CompanyID]
+	}
 	return nil
 }

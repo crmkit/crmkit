@@ -45,7 +45,7 @@ func TestQueryFiltersAndSort(t *testing.T) {
 		t.Fatalf("stage in (proposal,won) should match 3: %q", body)
 	}
 	// Sort descending by amount: Big first.
-	if _, body := do(t, ts, "GET", "/deals?sort=-amount_cents", tok, ""); !strings.HasPrefix(strings.TrimSpace(body), "deal/") || !strings.Contains(strings.Split(body, "\n")[0], "Big") {
+	if _, body := do(t, ts, "GET", "/deals?sort=-amount_cents", tok, ""); !strings.HasPrefix(strings.TrimSpace(body), "deal_") || !strings.Contains(strings.Split(body, "\n")[0], "Big") {
 		t.Fatalf("sort=-amount_cents should put Big first: %q", body)
 	}
 }
@@ -111,7 +111,7 @@ func TestQueryKeysetPagination(t *testing.T) {
 			t.Fatalf("page %d: %d %q", page, st, body)
 		}
 		for _, line := range strings.Split(body, "\n") {
-			if strings.HasPrefix(line, "contact/") {
+			if strings.HasPrefix(line, "contact_") {
 				id := firstHandleID(line, "contact/")
 				if seen[id] {
 					t.Fatalf("duplicate row across pages: %s", id)

@@ -68,11 +68,11 @@ func customFields(custom map[string]any) []Field {
 
 // ContactLine renders a contact as one grepable line.
 func ContactLine(c protocol.Contact) string {
-	return Line(protocol.Handle(protocol.KindContact, c.ID),
+	return Line(protocol.FormatRef(protocol.KindContact, c.Handle),
 		F("name", c.Name),
 		F("email", c.Email),
 		F("phone", c.Phone),
-		F("company", nameOrID(c.CompanyName, c.CompanyID)),
+		F("company", nameOrID(c.CompanyName, c.CompanyHandle)),
 		F("stage", c.Stage),
 		F("owner", c.Owner),
 		F("tags", strings.Join(c.Tags, ",")),
@@ -95,12 +95,12 @@ func Contacts(list []protocol.Contact) string {
 // Contact renders a full contact detail block.
 func Contact(c protocol.Contact) string {
 	fields := []Field{
-		F("handle", protocol.Handle(protocol.KindContact, c.ID)),
+		F("handle", protocol.FormatRef(protocol.KindContact, c.Handle)),
 		F("name", c.Name),
 		F("email", c.Email),
 		F("phone", c.Phone),
 		F("company", c.CompanyName),
-		F("company_id", c.CompanyID),
+		F("company_ref", c.CompanyHandle),
 		F("stage", c.Stage),
 		F("owner", c.Owner),
 		F("tags", strings.Join(c.Tags, ", ")),
@@ -154,7 +154,7 @@ func SearchResults(query string, contacts []protocol.Contact, companies []protoc
 
 // CompanyLine renders a company as one grepable line.
 func CompanyLine(c protocol.Company) string {
-	return Line(protocol.Handle(protocol.KindCompany, c.ID),
+	return Line(protocol.FormatRef(protocol.KindCompany, c.Handle),
 		F("name", c.Name),
 		F("domain", c.Domain),
 		F("tags", strings.Join(c.Tags, ",")),
@@ -176,7 +176,7 @@ func Companies(list []protocol.Company) string {
 // Company renders a full company detail block.
 func Company(c protocol.Company) string {
 	fields := []Field{
-		F("handle", protocol.Handle(protocol.KindCompany, c.ID)),
+		F("handle", protocol.FormatRef(protocol.KindCompany, c.Handle)),
 		F("name", c.Name),
 		F("domain", c.Domain),
 		F("tags", strings.Join(c.Tags, ", ")),
@@ -195,13 +195,13 @@ func Company(c protocol.Company) string {
 
 // DealLine renders a deal as one grepable line.
 func DealLine(d protocol.Deal) string {
-	return Line(protocol.Handle(protocol.KindDeal, d.ID),
+	return Line(protocol.FormatRef(protocol.KindDeal, d.Handle),
 		F("title", d.Title),
 		F("amount", money(d.AmountCents, d.Currency)),
 		F("stage", d.Stage),
 		F("status", d.Status),
-		F("contact", nameOrID(d.ContactName, d.ContactID)),
-		F("company", nameOrID(d.CompanyName, d.CompanyID)),
+		F("contact", nameOrID(d.ContactName, d.ContactHandle)),
+		F("company", nameOrID(d.CompanyName, d.CompanyHandle)),
 		F("followup", datep(d.FollowUpAt)),
 		F("updated", date(d.UpdatedAt)),
 	)
@@ -225,15 +225,15 @@ func Deals(list []protocol.Deal) string {
 // Deal renders a full deal detail block.
 func Deal(d protocol.Deal) string {
 	fields := []Field{
-		F("handle", protocol.Handle(protocol.KindDeal, d.ID)),
+		F("handle", protocol.FormatRef(protocol.KindDeal, d.Handle)),
 		F("title", d.Title),
 		F("amount", money(d.AmountCents, d.Currency)),
 		F("stage", d.Stage),
 		F("status", d.Status),
 		F("contact", d.ContactName),
-		F("contact_id", d.ContactID),
+		F("contact_ref", d.ContactHandle),
 		F("company", d.CompanyName),
-		F("company_id", d.CompanyID),
+		F("company_ref", d.CompanyHandle),
 		F("follow_up", datep(d.FollowUpAt)),
 		F("follow_up_note", d.FollowUpNote),
 		F("created", date(d.CreatedAt)),
@@ -250,12 +250,12 @@ func Deal(d protocol.Deal) string {
 
 // ActivityLine renders an activity as one grepable line.
 func ActivityLine(a protocol.Activity) string {
-	return Line(protocol.Handle(protocol.KindActivity, a.ID),
+	return Line(protocol.FormatRef(protocol.KindActivity, a.Handle),
 		F("kind", a.Kind),
 		F("by", a.CreatedBy),
-		F("contact", a.ContactID),
-		F("deal", a.DealID),
-		F("company", a.CompanyID),
+		F("contact", a.ContactHandle),
+		F("deal", a.DealHandle),
+		F("company", a.CompanyHandle),
 		F("at", date(a.CreatedAt)),
 		F("body", a.Body),
 	)

@@ -44,6 +44,31 @@ func (s *Server) serverErr(w http.ResponseWriter, r *http.Request) {
 	render.Error(w, r, http.StatusInternalServerError, "server_error", "Try again shortly.")
 }
 
+// resolveID maps a path reference (a short handle in any representation, or a raw
+// internal id) to the internal id for a kind. On failure it writes a 404 and
+// returns ok=false, so callers `if !ok { return }`.
+func (s *Server) resolveID(w http.ResponseWriter, r *http.Request, kind string) (string, bool) {
+	id, err := s.store.ResolveHandle(sessionFrom(r).WorkspaceID, kind, r.PathValue("id"))
+	if err != nil {
+		s.notFound(w, r, kind)
+		return "", false
+	}
+	return id, true
+}
+
+// relationID maps a relation reference from a request body (a handle, or a raw
+// id) to the internal id, leniently: a blank or unresolvable value is returned
+// as-is, so the render shows it as an unresolved fallback rather than failing.
+func (s *Server) relationID(ws, kind, ref string) string {
+	if strings.TrimSpace(ref) == "" {
+		return ""
+	}
+	if id, err := s.store.ResolveHandle(ws, kind, ref); err == nil {
+		return id
+	}
+	return ref
+}
+
 // ---- contacts ------------------------------------------------------------
 
 func (s *Server) handleListContacts(w http.ResponseWriter, r *http.Request) {
@@ -75,7 +100,7 @@ func (s *Server) handleCreateContact(w http.ResponseWriter, r *http.Request) {
 	var c protocol.Contact
 	if err := decodeBytes(body, &c); err != nil {
 		render.Error(w, r, http.StatusBadRequest, "bad_request",
-			`Send JSON, e.g. {"name":"Jane Doe","email":"jane@acme.com","company_id":"co_..."}.`)
+			`Send JSON, e.g. {"name":"Jane Doe","email":"jane@acme.com","company_id":"company_..."}.`)
 		return
 	}
 	if strings.TrimSpace(c.Name) == "" {
@@ -103,6 +128,7 @@ func (s *Server) handleCreateContact(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			existing.CreatedBy = creator
+			existing.CompanyID = s.relationID(sess.WorkspaceID, protocol.KindCompany, existing.CompanyID)
 			if err := s.store.UpdateContact(sess.WorkspaceID, &existing); err != nil {
 				s.serverErr(w, r)
 				return
@@ -118,6 +144,7 @@ func (s *Server) handleCreateContact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	c.CreatedBy = sess.Email // stamp the actor; never trust a client-supplied value
+	c.CompanyID = s.relationID(sess.WorkspaceID, protocol.KindCompany, c.CompanyID)
 	if err := s.store.CreateContact(sess.WorkspaceID, &c); err != nil {
 		s.serverErr(w, r)
 		return
@@ -129,7 +156,11 @@ func (s *Server) handleCreateContact(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleGetContact(w http.ResponseWriter, r *http.Request) {
 	sess := sessionFrom(r)
-	c, err := s.store.GetContact(sess.WorkspaceID, r.PathValue("id"))
+	id, ok := s.resolveID(w, r, protocol.KindContact)
+	if !ok {
+		return
+	}
+	c, err := s.store.GetContact(sess.WorkspaceID, id)
 	if errors.Is(err, store.ErrNotFound) {
 		s.notFound(w, r, "contact")
 		return
@@ -151,7 +182,11 @@ func (s *Server) handleGetContact(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleUpdateContact(w http.ResponseWriter, r *http.Request) {
 	sess := sessionFrom(r)
-	c, err := s.store.GetContact(sess.WorkspaceID, r.PathValue("id"))
+	id, ok := s.resolveID(w, r, protocol.KindContact)
+	if !ok {
+		return
+	}
+	c, err := s.store.GetContact(sess.WorkspaceID, id)
 	if errors.Is(err, store.ErrNotFound) {
 		s.notFound(w, r, "contact")
 		return
@@ -165,6 +200,7 @@ func (s *Server) handleUpdateContact(w http.ResponseWriter, r *http.Request) {
 		render.Error(w, r, http.StatusBadRequest, "bad_request", "Send a JSON object with only the fields you want to change.")
 		return
 	}
+	c.CompanyID = s.relationID(sess.WorkspaceID, protocol.KindCompany, c.CompanyID)
 	if err := s.store.UpdateContact(sess.WorkspaceID, &c); err != nil {
 		s.serverErr(w, r)
 		return
@@ -176,7 +212,10 @@ func (s *Server) handleUpdateContact(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleDeleteContact(w http.ResponseWriter, r *http.Request) {
 	sess := sessionFrom(r)
-	id := r.PathValue("id")
+	id, ok := s.resolveID(w, r, protocol.KindContact)
+	if !ok {
+		return
+	}
 	if !s.requireConfirm(w, r, protocol.KindContact, id) {
 		return
 	}
@@ -193,7 +232,10 @@ func (s *Server) handleDeleteContact(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleListContactActivities(w http.ResponseWriter, r *http.Request) {
 	sess := sessionFrom(r)
-	id := r.PathValue("id")
+	id, ok := s.resolveID(w, r, protocol.KindContact)
+	if !ok {
+		return
+	}
 	limit := render.Int(r.URL.Query().Get("limit"), 50)
 	list, err := s.store.ListActivities(sess.WorkspaceID, id, "", "", limit)
 	if err != nil {
@@ -207,7 +249,10 @@ func (s *Server) handleListContactActivities(w http.ResponseWriter, r *http.Requ
 
 func (s *Server) handleCreateContactActivity(w http.ResponseWriter, r *http.Request) {
 	sess := sessionFrom(r)
-	id := r.PathValue("id")
+	id, ok := s.resolveID(w, r, protocol.KindContact)
+	if !ok {
+		return
+	}
 	var a protocol.Activity
 	if err := decodeJSON(r, &a); err != nil {
 		render.Error(w, r, http.StatusBadRequest, "bad_request",
@@ -233,7 +278,10 @@ func (s *Server) handleCreateContactActivity(w http.ResponseWriter, r *http.Requ
 
 func (s *Server) handleListCompanyActivities(w http.ResponseWriter, r *http.Request) {
 	sess := sessionFrom(r)
-	id := r.PathValue("id")
+	id, ok := s.resolveID(w, r, protocol.KindCompany)
+	if !ok {
+		return
+	}
 	limit := render.Int(r.URL.Query().Get("limit"), 50)
 	list, err := s.store.ListActivities(sess.WorkspaceID, "", "", id, limit)
 	if err != nil {
@@ -246,7 +294,10 @@ func (s *Server) handleListCompanyActivities(w http.ResponseWriter, r *http.Requ
 
 func (s *Server) handleCreateCompanyActivity(w http.ResponseWriter, r *http.Request) {
 	sess := sessionFrom(r)
-	id := r.PathValue("id")
+	id, ok := s.resolveID(w, r, protocol.KindCompany)
+	if !ok {
+		return
+	}
 	var a protocol.Activity
 	if err := decodeJSON(r, &a); err != nil {
 		render.Error(w, r, http.StatusBadRequest, "bad_request",
@@ -354,7 +405,11 @@ func (s *Server) handleCreateCompany(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleGetCompany(w http.ResponseWriter, r *http.Request) {
 	sess := sessionFrom(r)
-	c, err := s.store.GetCompany(sess.WorkspaceID, r.PathValue("id"))
+	id, ok := s.resolveID(w, r, protocol.KindCompany)
+	if !ok {
+		return
+	}
+	c, err := s.store.GetCompany(sess.WorkspaceID, id)
 	if errors.Is(err, store.ErrNotFound) {
 		s.notFound(w, r, "company")
 		return
@@ -376,7 +431,11 @@ func (s *Server) handleGetCompany(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleUpdateCompany(w http.ResponseWriter, r *http.Request) {
 	sess := sessionFrom(r)
-	c, err := s.store.GetCompany(sess.WorkspaceID, r.PathValue("id"))
+	id, ok := s.resolveID(w, r, protocol.KindCompany)
+	if !ok {
+		return
+	}
+	c, err := s.store.GetCompany(sess.WorkspaceID, id)
 	if errors.Is(err, store.ErrNotFound) {
 		s.notFound(w, r, "company")
 		return
@@ -400,7 +459,10 @@ func (s *Server) handleUpdateCompany(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleDeleteCompany(w http.ResponseWriter, r *http.Request) {
 	sess := sessionFrom(r)
-	id := r.PathValue("id")
+	id, ok := s.resolveID(w, r, protocol.KindCompany)
+	if !ok {
+		return
+	}
 	if !s.requireConfirm(w, r, protocol.KindCompany, id) {
 		return
 	}
@@ -438,7 +500,7 @@ func (s *Server) handleCreateDeal(w http.ResponseWriter, r *http.Request) {
 	var d protocol.Deal
 	if err := decodeJSON(r, &d); err != nil {
 		render.Error(w, r, http.StatusBadRequest, "bad_request",
-			`Send JSON, e.g. {"title":"Acme renewal","amount_cents":500000,"currency":"USD","stage":"proposal","contact_id":"c_..."}.`)
+			`Send JSON, e.g. {"title":"Acme renewal","amount_cents":500000,"currency":"USD","stage":"proposal","contact_id":"contact_..."}.`)
 		return
 	}
 	if strings.TrimSpace(d.Title) == "" {
@@ -449,6 +511,8 @@ func (s *Server) handleCreateDeal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	d.CreatedBy = sess.Email // stamp the actor; never trust a client-supplied value
+	d.ContactID = s.relationID(sess.WorkspaceID, protocol.KindContact, d.ContactID)
+	d.CompanyID = s.relationID(sess.WorkspaceID, protocol.KindCompany, d.CompanyID)
 	if err := s.store.CreateDeal(sess.WorkspaceID, &d); err != nil {
 		s.serverErr(w, r)
 		return
@@ -460,7 +524,11 @@ func (s *Server) handleCreateDeal(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleGetDeal(w http.ResponseWriter, r *http.Request) {
 	sess := sessionFrom(r)
-	d, err := s.store.GetDeal(sess.WorkspaceID, r.PathValue("id"))
+	id, ok := s.resolveID(w, r, protocol.KindDeal)
+	if !ok {
+		return
+	}
+	d, err := s.store.GetDeal(sess.WorkspaceID, id)
 	if errors.Is(err, store.ErrNotFound) {
 		s.notFound(w, r, "deal")
 		return
@@ -482,7 +550,11 @@ func (s *Server) handleGetDeal(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleUpdateDeal(w http.ResponseWriter, r *http.Request) {
 	sess := sessionFrom(r)
-	d, err := s.store.GetDeal(sess.WorkspaceID, r.PathValue("id"))
+	id, ok := s.resolveID(w, r, protocol.KindDeal)
+	if !ok {
+		return
+	}
+	d, err := s.store.GetDeal(sess.WorkspaceID, id)
 	if errors.Is(err, store.ErrNotFound) {
 		s.notFound(w, r, "deal")
 		return
@@ -496,6 +568,8 @@ func (s *Server) handleUpdateDeal(w http.ResponseWriter, r *http.Request) {
 			`Send a JSON object with only the fields you want to change, e.g. {"stage":"won","status":"won"}.`)
 		return
 	}
+	d.ContactID = s.relationID(sess.WorkspaceID, protocol.KindContact, d.ContactID)
+	d.CompanyID = s.relationID(sess.WorkspaceID, protocol.KindCompany, d.CompanyID)
 	if err := s.store.UpdateDeal(sess.WorkspaceID, &d); err != nil {
 		s.serverErr(w, r)
 		return
@@ -507,7 +581,10 @@ func (s *Server) handleUpdateDeal(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleDeleteDeal(w http.ResponseWriter, r *http.Request) {
 	sess := sessionFrom(r)
-	id := r.PathValue("id")
+	id, ok := s.resolveID(w, r, protocol.KindDeal)
+	if !ok {
+		return
+	}
 	if !s.requireConfirm(w, r, protocol.KindDeal, id) {
 		return
 	}
@@ -546,7 +623,11 @@ func (s *Server) handleListReminders(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleListActivities(w http.ResponseWriter, r *http.Request) {
 	sess := sessionFrom(r)
 	q := r.URL.Query()
-	list, err := s.store.ListActivities(sess.WorkspaceID, q.Get("contact"), q.Get("deal"), q.Get("company"), render.Int(q.Get("limit"), 50))
+	// Filters accept a handle (or raw id); resolve each to the internal id.
+	contactID := s.relationID(sess.WorkspaceID, protocol.KindContact, q.Get("contact"))
+	dealID := s.relationID(sess.WorkspaceID, protocol.KindDeal, q.Get("deal"))
+	companyID := s.relationID(sess.WorkspaceID, protocol.KindCompany, q.Get("company"))
+	list, err := s.store.ListActivities(sess.WorkspaceID, contactID, dealID, companyID, render.Int(q.Get("limit"), 50))
 	if err != nil {
 		s.serverErr(w, r)
 		return
@@ -560,7 +641,10 @@ func (s *Server) handleListActivities(w http.ResponseWriter, r *http.Request) {
 // line, and you may prune several to free room under the activity quota.
 func (s *Server) handleDeleteActivity(w http.ResponseWriter, r *http.Request) {
 	sess := sessionFrom(r)
-	id := r.PathValue("id")
+	id, ok := s.resolveID(w, r, protocol.KindActivity)
+	if !ok {
+		return
+	}
 	if err := s.store.DeleteActivity(sess.WorkspaceID, id); errors.Is(err, store.ErrNotFound) {
 		render.Error(w, r, http.StatusNotFound, "not_found", "No activity with that id in your workspace.")
 		return
