@@ -103,6 +103,25 @@ func (s *Server) enforceWorkspaceCreateQuota(w http.ResponseWriter, r *http.Requ
 	return true
 }
 
+// canCreateWorkspace reports whether userID is under their workspace quota. It is
+// the non-HTTP counterpart of enforceWorkspaceCreateQuota, for flows (e.g. the
+// OAuth workspace picker) that render their own page instead of a JSON error.
+func (s *Server) canCreateWorkspace(userID string) (bool, error) {
+	plan, err := s.store.UserPlan(userID)
+	if err != nil {
+		return false, err
+	}
+	limit := s.cfg.Plans.LimitsFor(plan).MaxWorkspaces
+	if limit < 0 {
+		return true, nil
+	}
+	used, err := s.store.CountWorkspacesForUser(userID)
+	if err != nil {
+		return false, err
+	}
+	return used < limit, nil
+}
+
 // workspaceResourceCount returns current usage for a resource. A member "seat"
 // is a member plus any pending invite, so over-inviting is rejected.
 func (s *Server) workspaceResourceCount(workspaceID, resource string) (int, error) {

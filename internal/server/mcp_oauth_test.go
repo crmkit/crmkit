@@ -31,6 +31,13 @@ func newOAuthServer(t *testing.T) (*httptest.Server, *captureMailer) {
 	st := newMigratedStore(t)
 	cfg := config.Default()
 	cfg.Server.BaseURL = "https://api.example.test"
+	// These tests exercise the OAuth flow, not quotas; give the default plan
+	// unlimited limits so e.g. creating a second workspace at the picker isn't
+	// blocked by the basic plan's max_workspaces=1.
+	if pl, ok := cfg.Plans.Catalogue[cfg.Plans.Default]; ok {
+		pl.MaxWorkspaces, pl.MaxMembers, pl.MaxContacts, pl.MaxCompanies, pl.MaxDeals = -1, -1, -1, -1, -1
+		cfg.Plans.Catalogue[cfg.Plans.Default] = pl
+	}
 	srv := New(cfg, st, memoryRL(t))
 	mailer := &captureMailer{}
 	srv.mailer = mailer
@@ -172,14 +179,10 @@ func TestOAuthToMCPEndToEnd(t *testing.T) {
 	step2.Set("email", "owner@example.com")
 	step2.Set("code", code)
 	r2 := postForm(t, noRedirect, ts.URL+"/oauth/authorize", step2)
+	b2, _ := io.ReadAll(r2.Body)
 	r2.Body.Close()
-	if r2.StatusCode != http.StatusFound {
-		t.Fatalf("authorize step2 should redirect, got %d", r2.StatusCode)
-	}
-	loc, err := url.Parse(r2.Header.Get("Location"))
-	if err != nil {
-		t.Fatalf("bad redirect location: %v", err)
-	}
+	// Single-workspace users now also see the picker; complete it.
+	loc := completePicker(t, ts, noRedirect, common, "owner@example.com", b2)
 	if loc.Query().Get("state") != "xyz123" {
 		t.Fatalf("state not echoed: %q", loc.RawQuery)
 	}
@@ -316,6 +319,33 @@ func TestOAuthRegisterRejectsDisallowedRedirect(t *testing.T) {
 }
 
 var ticketRe = regexp.MustCompile(`name="login_ticket" value="([^"]+)"`)
+var wsIDRe = regexp.MustCompile(`name="workspace_id"\s+value="([^"]+)"`)
+
+// completePicker finishes the workspace-selection step (now shown to every user,
+// single- or multi-workspace) by submitting the signed ticket and the first
+// offered workspace, returning the redirect Location.
+func completePicker(t *testing.T, ts *httptest.Server, client *http.Client, common url.Values, email string, pickerBody []byte) *url.URL {
+	t.Helper()
+	tm := ticketRe.FindSubmatch(pickerBody)
+	wm := wsIDRe.FindSubmatch(pickerBody)
+	if tm == nil || wm == nil {
+		t.Fatalf("picker missing login_ticket/workspace_id:\n%s", pickerBody)
+	}
+	step := cloneValues(common)
+	step.Set("email", email)
+	step.Set("login_ticket", string(tm[1]))
+	step.Set("workspace_id", string(wm[1]))
+	r := postForm(t, client, ts.URL+"/oauth/authorize", step)
+	r.Body.Close()
+	if r.StatusCode != http.StatusFound {
+		t.Fatalf("workspace step should redirect, got %d", r.StatusCode)
+	}
+	loc, err := url.Parse(r.Header.Get("Location"))
+	if err != nil {
+		t.Fatalf("redirect parse: %v", err)
+	}
+	return loc
+}
 
 // TestOAuthWorkspaceSelection verifies that a user belonging to more than one
 // workspace is shown the picker after entering the code, and that the chosen
@@ -499,6 +529,79 @@ func TestMCPRequestTool(t *testing.T) {
 	}
 }
 
+// TestOAuthCreateWorkspaceAtPicker verifies a user can create a brand-new
+// workspace at the picker (instead of selecting an existing one), and the minted
+// token operates in it.
+func TestOAuthCreateWorkspaceAtPicker(t *testing.T) {
+	ts, mailer := newOAuthServer(t)
+	redirectURI := "https://client.example/cb"
+	noRedirect := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+
+	_, body := do(t, ts, "POST", "/oauth/register", "", `{"redirect_uris":["`+redirectURI+`"]}`)
+	var reg struct {
+		ClientID string `json:"client_id"`
+	}
+	if err := json.Unmarshal([]byte(body), &reg); err != nil || reg.ClientID == "" {
+		t.Fatalf("register: %v (%s)", err, body)
+	}
+	verifier, challenge := pkcePair()
+	common := url.Values{
+		"response_type": {"code"}, "client_id": {reg.ClientID}, "redirect_uri": {redirectURI},
+		"code_challenge": {challenge}, "code_challenge_method": {"S256"}, "state": {"st"}, "scope": {"crm"},
+	}
+	const email = "founder@example.com"
+
+	s1 := cloneValues(common)
+	s1.Set("email", email)
+	postForm(t, noRedirect, ts.URL+"/oauth/authorize", s1).Body.Close()
+	otp := sixDigits.FindString(mailer.last.Text)
+
+	s2 := cloneValues(common)
+	s2.Set("email", email)
+	s2.Set("code", otp)
+	r2 := postForm(t, noRedirect, ts.URL+"/oauth/authorize", s2)
+	pickerBody, _ := io.ReadAll(r2.Body)
+	r2.Body.Close()
+
+	// At the picker, create a new workspace instead of picking the existing one.
+	tm := ticketRe.FindSubmatch(pickerBody)
+	if tm == nil {
+		t.Fatalf("no login_ticket in picker:\n%s", pickerBody)
+	}
+	s3 := cloneValues(common)
+	s3.Set("email", email)
+	s3.Set("login_ticket", string(tm[1]))
+	s3.Set("new_workspace", "Project X")
+	r3 := postForm(t, noRedirect, ts.URL+"/oauth/authorize", s3)
+	r3.Body.Close()
+	if r3.StatusCode != http.StatusFound {
+		t.Fatalf("create-workspace step should redirect, got %d", r3.StatusCode)
+	}
+	loc, _ := url.Parse(r3.Header.Get("Location"))
+	authCode := loc.Query().Get("code")
+	if authCode == "" {
+		t.Fatalf("no auth code in redirect: %q", loc.RawQuery)
+	}
+
+	tr := postForm(t, http.DefaultClient, ts.URL+"/oauth/token", url.Values{
+		"grant_type": {"authorization_code"}, "code": {authCode}, "redirect_uri": {redirectURI},
+		"client_id": {reg.ClientID}, "code_verifier": {verifier},
+	})
+	tb, _ := io.ReadAll(tr.Body)
+	tr.Body.Close()
+	var tok struct {
+		AccessToken string `json:"access_token"`
+	}
+	if json.Unmarshal(tb, &tok); tok.AccessToken == "" {
+		t.Fatalf("no access token: %s", tb)
+	}
+
+	// The new workspace exists and the token works.
+	if status, list := do(t, ts, "GET", "/workspaces", tok.AccessToken, ""); status != 200 || !strings.Contains(list, "Project X") {
+		t.Fatalf("new workspace 'Project X' not present: %d %q", status, list)
+	}
+}
+
 // obtainAuthCode registers a client and runs the authorize flow (single-
 // workspace user) to return a fresh authorization code plus the client id and
 // PKCE verifier needed to redeem it.
@@ -525,13 +628,11 @@ func obtainAuthCode(t *testing.T, ts *httptest.Server, mailer *captureMailer, em
 	s2.Set("email", email)
 	s2.Set("code", otp)
 	r2 := postForm(t, noRedirect, ts.URL+"/oauth/authorize", s2)
+	b2, _ := io.ReadAll(r2.Body)
 	r2.Body.Close()
-	loc, err := url.Parse(r2.Header.Get("Location"))
-	if err != nil {
-		t.Fatalf("redirect parse: %v", err)
-	}
+	loc := completePicker(t, ts, noRedirect, common, email, b2)
 	if loc.Query().Get("code") == "" {
-		t.Fatalf("no auth code in redirect: %q", r2.Header.Get("Location"))
+		t.Fatalf("no auth code in redirect: %q", loc.RawQuery)
 	}
 	return reg.ClientID, v, loc.Query().Get("code")
 }

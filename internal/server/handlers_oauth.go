@@ -254,11 +254,34 @@ func (s *Server) handleOAuthAuthorizePost(w http.ResponseWriter, r *http.Request
 				Error: "Your sign-in step expired. Close this and reconnect to start over."})
 			return
 		}
+		// The user can either pick an existing workspace or create a new one.
+		if name := strings.TrimSpace(r.PostFormValue("new_workspace")); name != "" {
+			ok, err := s.canCreateWorkspace(userID)
+			if err != nil {
+				workspaces, _ := s.store.ListWorkspacesForUser(userID)
+				s.renderWorkspacePicker(w, p, userID, email, "Something went wrong. Try again.", workspaces)
+				return
+			}
+			if !ok {
+				workspaces, _ := s.store.ListWorkspacesForUser(userID)
+				s.renderWorkspacePicker(w, p, userID, email, "You've reached your workspace limit. Pick an existing one.", workspaces)
+				return
+			}
+			ws, err := s.store.CreateWorkspace(userID, name)
+			if err != nil {
+				workspaces, _ := s.store.ListWorkspacesForUser(userID)
+				s.renderWorkspacePicker(w, p, userID, email, "Could not create that workspace. Try again.", workspaces)
+				return
+			}
+			s.finishAuthorize(w, r, p, userID, ws.ID)
+			return
+		}
+
 		workspaceID := strings.TrimSpace(r.PostFormValue("workspace_id"))
 		// Authorize the choice: the user must actually be a member of it.
 		if _, err := s.store.MemberRole(workspaceID, userID); err != nil {
 			workspaces, _ := s.store.ListWorkspacesForUser(userID)
-			s.renderWorkspacePicker(w, p, userID, email, "Choose a workspace you belong to.", workspaces)
+			s.renderWorkspacePicker(w, p, userID, email, "Choose a workspace you belong to, or create a new one.", workspaces)
 			return
 		}
 		s.finishAuthorize(w, r, p, userID, workspaceID)
@@ -337,19 +360,10 @@ func (s *Server) handleOAuthAuthorizePost(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// One workspace: nothing to choose, establish the grant straight away in the
-	// workspace the user actually belongs to (their stored default may be stale -
-	// e.g. they were removed from it - so use the membership, not DefaultWorkspaceID).
-	// Several: let the user pick which one this connection operates in.
+	// Always show the workspace step: the user picks which workspace this
+	// connection operates in, or creates a new one for it. (Even with a single
+	// workspace it is pre-selected, so connecting is one click.)
 	workspaces, _ := s.store.ListWorkspacesForUser(user.ID)
-	if len(workspaces) <= 1 {
-		workspaceID := user.DefaultWorkspaceID
-		if len(workspaces) == 1 {
-			workspaceID = workspaces[0].ID
-		}
-		s.finishAuthorize(w, r, p, user.ID, workspaceID)
-		return
-	}
 	s.renderWorkspacePicker(w, p, user.ID, email, "", workspaces)
 }
 

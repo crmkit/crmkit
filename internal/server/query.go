@@ -2,6 +2,7 @@ package server
 
 import (
 	"net/http"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -33,10 +34,12 @@ type queryConfig struct {
 	sortBy  map[string]colSpec
 	search  []string
 	defSort string
+	tags    bool // entity has a tags column -> support ?tags= membership filtering
+	custom  bool // entity has a custom JSON column -> support ?custom.<key>= filtering
 }
 
 var reservedParams = map[string]bool{
-	"sort": true, "limit": true, "cursor": true, "search": true, "format": true,
+	"sort": true, "limit": true, "cursor": true, "search": true, "format": true, "tags": true,
 }
 
 // opToSQL maps the user operator token to a SQL operator. "LIKE" is a sentinel
@@ -70,6 +73,14 @@ func parseListQuery(r *http.Request, cfg queryConfig) (store.Query, error) {
 	if err != nil {
 		return q, &queryError{"invalid_cursor", "The cursor is malformed. Omit it to start from the first page."}
 	}
+	// A cursor's sort column is interpolated into ORDER BY / the keyset comparison
+	// (it can't be a bound parameter - it's an identifier). The cursor is opaque
+	// but client-supplied and unsigned, so a tampered one could inject SQL here.
+	// Reject any cursor whose column is not a legitimate sortable column; a cursor
+	// we issued always carries one.
+	if cur != nil && !cfg.sortableColumn(cur.Col) {
+		return q, &queryError{"invalid_cursor", "The cursor is malformed. Omit it to start from the first page."}
+	}
 	q.Cursor = cur
 
 	q.Search = strings.TrimSpace(qv.Get("search"))
@@ -93,8 +104,33 @@ func parseListQuery(r *http.Request, cfg queryConfig) (store.Query, error) {
 		}
 	}
 
+	// Tag membership: ?tags=competitor (repeatable or comma-separated). Tags are
+	// stored as a JSON array string, so membership is a LIKE on the quoted value;
+	// multiple tags are AND-ed (the record must carry all of them).
+	if cfg.tags {
+		for _, raw := range qv["tags"] {
+			for _, tag := range strings.Split(raw, ",") {
+				if tag = strings.TrimSpace(tag); tag != "" {
+					q.Filters = append(q.Filters, store.QFilter{Column: "tags", Op: "LIKE", Value: `%"` + tag + `"%`})
+				}
+			}
+		}
+	}
+
 	for field, vals := range qv {
 		if reservedParams[field] || len(vals) == 0 {
+			continue
+		}
+		// custom.<key>=value filters on a key inside the custom JSON column.
+		if strings.HasPrefix(field, "custom.") {
+			if !cfg.custom {
+				return q, &queryError{"invalid_filter", "this resource has no custom fields to filter on."}
+			}
+			key := strings.TrimPrefix(field, "custom.")
+			if !customKeyRe.MatchString(key) {
+				return q, &queryError{"invalid_filter", "custom field key must be letters, digits, or underscore, e.g. custom.region."}
+			}
+			q.Filters = append(q.Filters, buildCustomFilter(key, vals[0]))
 			continue
 		}
 		spec, ok := cfg.filter[field]
@@ -108,6 +144,41 @@ func parseListQuery(r *http.Request, cfg queryConfig) (store.Query, error) {
 		q.Filters = append(q.Filters, f)
 	}
 	return q, nil
+}
+
+// sortableColumn reports whether col is a real, whitelisted sort column for this
+// entity. Used to reject a tampered cursor before its column reaches ORDER BY.
+func (cfg queryConfig) sortableColumn(col string) bool {
+	for _, spec := range cfg.sortBy {
+		if spec.column == col {
+			return true
+		}
+	}
+	return false
+}
+
+// customKeyRe restricts custom field keys to simple identifiers, so a key cannot
+// smuggle anything odd into the JSON path (the key is also bound, not interpolated).
+var customKeyRe = regexp.MustCompile(`^[A-Za-z0-9_]{1,64}$`)
+
+// buildCustomFilter builds a JSON-key filter on the custom column. The value is
+// matched as text: "like:term" is a case-insensitive contains, otherwise an exact
+// match (an optional "eq:" prefix is accepted for symmetry).
+func buildCustomFilter(key, raw string) store.QFilter {
+	op, val := "=", raw
+	switch {
+	case strings.HasPrefix(raw, "like:"):
+		op, val = "LIKE", strings.TrimPrefix(raw, "like:")
+	case strings.HasPrefix(raw, "eq:"):
+		val = strings.TrimPrefix(raw, "eq:")
+	}
+	f := store.QFilter{Column: "custom", JSONKey: key, Op: op}
+	if op == "LIKE" {
+		f.Value = "%" + val + "%"
+	} else {
+		f.Value = val
+	}
+	return f
 }
 
 // buildFilter parses a "[op:]value" token into a store.QFilter.
@@ -211,6 +282,8 @@ var contactQuery = queryConfig{
 	},
 	search:  []string{"name", "email", "phone", "company_id", "stage"},
 	defSort: "updated_at",
+	tags:    true,
+	custom:  true,
 }
 
 var companyQuery = queryConfig{
@@ -222,8 +295,10 @@ var companyQuery = queryConfig{
 	sortBy: map[string]colSpec{
 		"created_at": {"created_at", colTime}, "updated_at": {"updated_at", colTime}, "name": {"name", colText},
 	},
-	search:  []string{"name", "domain"},
+	search:  []string{"name", "domain", "notes"},
 	defSort: "updated_at",
+	tags:    true,
+	custom:  true,
 }
 
 var dealQuery = queryConfig{
@@ -239,4 +314,5 @@ var dealQuery = queryConfig{
 	},
 	search:  []string{"title"},
 	defSort: "updated_at",
+	custom:  true,
 }

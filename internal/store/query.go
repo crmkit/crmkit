@@ -23,6 +23,10 @@ type QFilter struct {
 	Op     string // "=", "!=", ">", ">=", "<", "<=", "LIKE", "IN", "IS NULL", "IS NOT NULL"
 	Value  any    // for binary ops
 	Values []any  // for IN
+	// JSONKey, when set, filters on a key inside the JSON `Column` (e.g. custom):
+	// the comparison applies to the extracted text. Op is "=" or "LIKE". The key
+	// is bound as a parameter, so it is injection-safe.
+	JSONKey string
 }
 
 // Query is a validated list query: filters AND-ed together, an optional fuzzy
@@ -87,6 +91,18 @@ func (s *sqlStore) buildListSQL(table, columns, ws string, q Query) (string, []a
 	sb.WriteString("SELECT " + columns + " FROM " + table + " WHERE workspace_id = ?")
 
 	for _, f := range q.Filters {
+		// A JSON-key filter compares a key inside the JSON column as text. The key
+		// is bound (injection-safe); Op is "=" or "LIKE".
+		if f.JSONKey != "" {
+			expr, keyArg := s.d.jsonText(f.Column, f.JSONKey)
+			op := f.Op
+			if op == "LIKE" {
+				op = s.d.like
+			}
+			fmt.Fprintf(&sb, " AND %s %s ?", expr, op)
+			args = append(args, keyArg, f.Value)
+			continue
+		}
 		switch f.Op {
 		case "IS NULL", "IS NOT NULL":
 			fmt.Fprintf(&sb, " AND %s %s", f.Column, f.Op)

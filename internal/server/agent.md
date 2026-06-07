@@ -149,6 +149,13 @@ Fuzzy search across key fields: ?search=acme
 Filter by creator: ?created_by=agent@x.com - every record is stamped with the
 member (human or agent) that created it; filter to organise records by who made
 them.
+Group by tags: contacts and companies carry a tags array (e.g. "competitor",
+"watchlist", "fintech"). Set them on create/update; filter with ?tags=competitor
+(repeat or comma-separate to require several, e.g. ?tags=competitor,fintech).
+Filter by a custom field: ?custom.<key>=value matches a key inside the record's
+custom JSON (contacts, companies, deals), e.g. ?custom.region=emea. Use
+?custom.<key>=like:term for a contains match. Compared as text - best for string
+custom fields.
 Sort: ?sort=field or ?sort=-field (the - means descending).
 Paginate: ?limit=N (default 50, max 200). When more rows remain, the response
 ends with a line # next: <cursor> (JSON: "next_cursor"); fetch the next page
@@ -182,11 +189,13 @@ DELETE /contacts/{id}?confirm= delete (two-step)
 GET /contacts/{id}/activities activity log for a contact
 POST /contacts/{id}/activities log {"kind":"call|email|meeting|note|task","body":...}
 
-GET /companies?<filters>&search=&sort=&limit=&cursor= list/query companies (see QUERY)
-POST /companies create OR update by domain (upsert) {"name":...,"domain":...,"custom":{...}}
-GET /companies/{id} fetch one company
+GET /companies?<filters>&search=&sort=&limit=&cursor= list/query companies (see QUERY; search covers name, domain, notes)
+POST /companies create OR update by domain (upsert) {"name":...,"domain":...,"tags":[...],"notes":"...","custom":{...}}
+GET /companies/{id} fetch one company (includes created_by + an activity summary)
 PATCH /companies/{id} update fields
 DELETE /companies/{id}?confirm= delete (two-step)
+GET /companies/{id}/activities activity log for a company
+POST /companies/{id}/activities log {"kind":"call|email|meeting|note|task","body":...}
 
 GET /deals?<filters>&search=&sort=&limit=&cursor= list/query deals (see QUERY)
 POST /deals create {"title":...,"amount_cents":...,"currency":"USD","stage":...,"contact_id":...,"company_id":...}
@@ -195,7 +204,7 @@ PATCH /deals/{id} update (e.g. {"stage":"won","status":"won"})
 DELETE /deals/{id}?confirm= delete (two-step)
 
 GET /reminders?days=&limit= due/overdue follow-ups (contacts + deals due now; ?days=N looks ahead)
-GET /activities?contact=&deal=&limit= recent activities (each shows by= who logged it)
+GET /activities?contact=&deal=&company=&limit= recent activities (each shows by= who logged it)
 GET /audit?by=&limit= workspace audit log - who did what; by=email filters to one member (human or agent)
 
 ## REMINDERS (pull, not push)

@@ -158,8 +158,8 @@
         {{else if eq .Step "workspace"}}
         <h1>Choose a workspace</h1>
         <p class="sub">
-          You belong to more than one workspace. Pick the one this connection
-          should operate in.
+          Pick the workspace this connection should operate in, or create a new
+          one for it.
         </p>
         {{if .Error}}
         <div class="msg err">{{.Error}}</div>
@@ -168,16 +168,24 @@
           {{template "params" .}}
           <input type="hidden" name="email" value="{{.Email}}" />
           <input type="hidden" name="login_ticket" value="{{.Ticket}}" />
-          {{range .Workspaces}}
+          {{range $i, $w := .Workspaces}}
           <label class="ws"
             ><input
               type="radio"
               name="workspace_id"
-              value="{{.ID}}"
-              required
-            />{{.Name}}<span>{{.Role}}</span></label
+              value="{{$w.ID}}"
+              {{if eq $i 0}}checked{{end}}
+            />{{$w.Name}}<span>{{$w.Role}}</span></label
           >
           {{end}}
+          <label for="new_workspace">Or create a new workspace</label>
+          <input
+            id="new_workspace"
+            name="new_workspace"
+            type="text"
+            placeholder="New workspace name"
+            maxlength="80"
+          />
           <button type="submit">Connect</button>
         </form>
         {{else}}

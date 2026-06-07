@@ -122,6 +122,8 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /companies/{id}", s.authed(s.handleGetCompany))
 	mux.HandleFunc("PATCH /companies/{id}", s.authed(s.handleUpdateCompany))
 	mux.HandleFunc("DELETE /companies/{id}", s.authed(s.handleDeleteCompany))
+	mux.HandleFunc("GET /companies/{id}/activities", s.authed(s.handleListCompanyActivities))
+	mux.HandleFunc("POST /companies/{id}/activities", s.authed(s.handleCreateCompanyActivity))
 
 	// Deals.
 	mux.HandleFunc("GET /deals", s.authed(s.handleListDeals))

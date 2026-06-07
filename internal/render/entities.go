@@ -157,6 +157,7 @@ func CompanyLine(c protocol.Company) string {
 	return Line(protocol.Handle(protocol.KindCompany, c.ID),
 		F("name", c.Name),
 		F("domain", c.Domain),
+		F("tags", strings.Join(c.Tags, ",")),
 		F("updated", date(c.UpdatedAt)),
 	)
 }
@@ -178,9 +179,13 @@ func Company(c protocol.Company) string {
 		F("handle", protocol.Handle(protocol.KindCompany, c.ID)),
 		F("name", c.Name),
 		F("domain", c.Domain),
+		F("tags", strings.Join(c.Tags, ", ")),
+		F("notes", c.Notes),
 		F("created", date(c.CreatedAt)),
 		F("created_by", c.CreatedBy),
 		F("updated", date(c.UpdatedAt)),
+		F("activities", countField(c.ActivityCount)),
+		F("last_activity", datep(c.LastActivityAt)),
 	}
 	fields = append(fields, customFields(c.Custom)...)
 	return Record(fields...)
@@ -250,6 +255,7 @@ func ActivityLine(a protocol.Activity) string {
 		F("by", a.CreatedBy),
 		F("contact", a.ContactID),
 		F("deal", a.DealID),
+		F("company", a.CompanyID),
 		F("at", date(a.CreatedAt)),
 		F("body", a.Body),
 	)
