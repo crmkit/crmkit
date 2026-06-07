@@ -15,14 +15,15 @@ import (
 )
 
 const (
-	defaultListenAddr    = ":8080"
-	defaultBaseURL       = "http://localhost:8080"
-	defaultOTPTTL        = 600     // seconds a login code stays valid
-	defaultEscalationTTL = 600     // seconds a step-up code stays valid
-	defaultTokenIdleTTL  = 2592000 // 30 days of inactivity before an access token expires
-	defaultTokenName     = "default"
-	defaultAuthCodeTTL   = 600     // seconds an OAuth authorization code stays valid
-	defaultRefreshTTL    = 7776000 // 90 days before an idle OAuth refresh token dies
+	defaultListenAddr         = ":8080"
+	defaultBaseURL            = "http://localhost:8080"
+	defaultOTPTTL             = 600     // seconds a login code stays valid
+	defaultEscalationTTL      = 600     // seconds a step-up code stays valid
+	defaultTokenIdleTTL       = 2592000 // 30 days of inactivity before an access token expires
+	defaultAuditRetentionDays = 180     // audit entries older than this are pruned
+	defaultTokenName          = "default"
+	defaultAuthCodeTTL        = 600     // seconds an OAuth authorization code stays valid
+	defaultRefreshTTL         = 7776000 // 90 days before an idle OAuth refresh token dies
 )
 
 // Config is the top-level crmkit server configuration.
@@ -129,6 +130,16 @@ type PlanLimits struct {
 	MaxContacts   int `yaml:"max_contacts"`
 	MaxCompanies  int `yaml:"max_companies"`
 	MaxDeals      int `yaml:"max_deals"`
+	// MaxActivities is a per-workspace backstop on the activity log. Activities
+	// are a timeline, not a collection, so this is set generously (an abuse/
+	// storage backstop, not a usability quota).
+	MaxActivities int `yaml:"max_activities"`
+	// AuditRetentionDays bounds the audit log by age, per plan: a workspace's
+	// audit entries older than this are pruned (the audit is a security log, not
+	// record history, so it is time-bounded). This is a duration, not a count, so
+	// it is not part of For(); it makes audit history a natural tier lever. 0
+	// (unset) takes the default; a negative value keeps audit entries forever.
+	AuditRetentionDays int `yaml:"audit_retention_days"`
 }
 
 // defaultBasicLimits is the built-in "basic" plan, applied when the config does
@@ -136,11 +147,13 @@ type PlanLimits struct {
 // bounding runaway/abusive growth.
 func defaultBasicLimits() PlanLimits {
 	return PlanLimits{
-		MaxWorkspaces: 1,
-		MaxMembers:    1,
-		MaxContacts:   1000,
-		MaxCompanies:  1000,
-		MaxDeals:      1000,
+		MaxWorkspaces:      1,
+		MaxMembers:         1,
+		MaxContacts:        1000,
+		MaxCompanies:       1000,
+		MaxDeals:           1000,
+		MaxActivities:      10000, // ~10x the data rows; activities accumulate faster
+		AuditRetentionDays: defaultAuditRetentionDays,
 	}
 }
 
@@ -154,7 +167,8 @@ func (p PlansConfig) LimitsFor(plan string) PlanLimits {
 }
 
 // For returns the limit for a named resource ("workspaces", "members",
-// "contacts", "companies", "deals"); -1 (unlimited) for anything unknown.
+// "contacts", "companies", "deals", "activities"); -1 (unlimited) for anything
+// unknown.
 func (l PlanLimits) For(resource string) int {
 	switch resource {
 	case "workspaces":
@@ -167,6 +181,8 @@ func (l PlanLimits) For(resource string) int {
 		return l.MaxCompanies
 	case "deals":
 		return l.MaxDeals
+	case "activities":
+		return l.MaxActivities
 	}
 	return -1
 }
@@ -491,6 +507,14 @@ func applyDefaults(cfg *Config) {
 	// out of the box (e.g. the env-only deployment with no plans config).
 	if _, ok := cfg.Plans.Catalogue[cfg.Plans.Default]; !ok {
 		cfg.Plans.Catalogue[cfg.Plans.Default] = defaultBasicLimits()
+	}
+	// Every plan gets an audit-retention window: 0 (unset) takes the default;
+	// a negative value is the opt-out (keep audit forever for that plan).
+	for name, l := range cfg.Plans.Catalogue {
+		if l.AuditRetentionDays == 0 {
+			l.AuditRetentionDays = defaultAuditRetentionDays
+			cfg.Plans.Catalogue[name] = l
+		}
 	}
 	// Rate-limit defaults apply only when unset (0). Set rps negative to disable
 	// the general limiter; it is normalized to 0 (disabled) below.

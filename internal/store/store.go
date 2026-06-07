@@ -123,10 +123,12 @@ type Store interface {
 
 	// activities & audit
 	CreateActivity(ws string, a *protocol.Activity) error
+	DeleteActivity(ws, id string) error
 	ListActivities(ws, contactID, dealID, companyID string, limit int) ([]protocol.Activity, error)
 	ActivityStats(ws, contactID, dealID, companyID string) (int, time.Time, error)
 	WriteAudit(ws, tokenID, actorEmail, action, target, detail string) error
 	ListAudit(ws, actorEmail string, limit int) ([]AuditEntry, error)
+	PruneAuditForPlan(plan string, before int64) (int64, error)
 }
 
 // Compile-time assurance that the SQLite backend satisfies the interface.

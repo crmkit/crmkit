@@ -31,6 +31,32 @@ func TestCompanyNotesSearchable(t *testing.T) {
 	}
 }
 
+func TestDeleteActivity(t *testing.T) {
+	ts := newTestServer(t)
+	token := authenticate(t, ts)
+
+	_, b := do(t, ts, "POST", "/contacts", token, `{"name":"Jane"}`)
+	cid := firstHandleID(b, "contact/")
+	_, ab := do(t, ts, "POST", "/contacts/"+cid+"/activities", token, `{"kind":"note","body":"a mistake"}`)
+	aid := firstHandleID(ab, "activity/")
+	if aid == "" {
+		t.Fatalf("no activity id in %q", ab)
+	}
+
+	// One-shot delete (no confirm step).
+	if s, body := do(t, ts, "DELETE", "/activities/"+aid, token, ""); s != http.StatusOK || !strings.Contains(body, "deleted") {
+		t.Fatalf("delete activity: %d %q", s, body)
+	}
+	// Gone from the contact's timeline.
+	if _, l := do(t, ts, "GET", "/contacts/"+cid+"/activities", token, ""); strings.Contains(l, "a mistake") {
+		t.Fatalf("deleted activity still listed:\n%s", l)
+	}
+	// Re-deleting is a 404.
+	if s, _ := do(t, ts, "DELETE", "/activities/"+aid, token, ""); s != http.StatusNotFound {
+		t.Fatalf("re-delete should 404, got %d", s)
+	}
+}
+
 func TestCompanyActivities(t *testing.T) {
 	ts := newTestServer(t)
 	token := authenticate(t, ts)

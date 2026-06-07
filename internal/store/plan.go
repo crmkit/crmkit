@@ -33,9 +33,9 @@ func (s *sqlStore) CountWorkspacesForUser(userID string) (int, error) {
 }
 
 // CountResource counts existing objects of a kind within a workspace, for quota
-// checks. kind is one of: members, invites, contacts, companies, deals. The
-// table/condition are code-controlled (never user input), so this is
-// injection-safe.
+// checks. kind is one of: members, invites, contacts, companies, deals,
+// activities. The table/condition are code-controlled (never user input), so
+// this is injection-safe.
 func (s *sqlStore) CountResource(workspaceID, kind string) (int, error) {
 	switch kind {
 	case "members":
@@ -48,6 +48,8 @@ func (s *sqlStore) CountResource(workspaceID, kind string) (int, error) {
 		return s.countWhere(`SELECT count(*) FROM companies WHERE workspace_id = ?`, workspaceID)
 	case "deals":
 		return s.countWhere(`SELECT count(*) FROM deals WHERE workspace_id = ?`, workspaceID)
+	case "activities":
+		return s.countWhere(`SELECT count(*) FROM activities WHERE workspace_id = ?`, workspaceID)
 	default:
 		return 0, fmt.Errorf("unknown resource %q", kind)
 	}
