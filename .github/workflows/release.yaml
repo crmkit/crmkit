@@ -80,14 +80,18 @@ jobs:
         with:
           fetch-depth: 0
 
-      # Curated, grouped release notes from the conventional-commit history
-      # (this tag's section only). See cliff.toml.
+      # Release notes are the latest section of the curated CHANGELOG.md (shipped
+      # from the upstream monorepo). git-cliff is not used here: this repo's git
+      # history is squashed sync commits it cannot parse. Extract everything
+      # between the first "## [" version header and the next one.
       - name: Generate release notes
         id: notes
-        uses: orhun/git-cliff-action@v4
-        with:
-          config: cliff.toml
-          args: --latest --strip header
+        run: |
+          {
+            echo "content<<CHANGELOG_EOF"
+            awk '/^## \[/ { if (seen) exit; seen=1; next } seen { print }' CHANGELOG.md
+            echo "CHANGELOG_EOF"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
