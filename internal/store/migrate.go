@@ -148,6 +148,49 @@ var migrations = []Migration{
 		`ALTER TABLE companies ADD COLUMN version BIGINT NOT NULL DEFAULT 1`,
 		`ALTER TABLE deals ADD COLUMN version BIGINT NOT NULL DEFAULT 1`,
 	}},
+	// v12 (2026-06-08): support tickets. A ticket is a first-class record (its own
+	// entity, not a repurposed deal): a customer request with a status and an
+	// assignee. requester_id references a contact (the customer); assignee is a
+	// member email, mirroring `owner`. The opening message is `content`; the
+	// conversation/activity layer and the rest of the lifecycle come later.
+	{Version: 12, Name: "tickets", Statements: []string{
+		`CREATE TABLE IF NOT EXISTS tickets (
+	id           TEXT PRIMARY KEY,
+	workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+	handle       TEXT NOT NULL DEFAULT '',
+	version      BIGINT NOT NULL DEFAULT 1,
+	subject      TEXT NOT NULL,
+	content      TEXT,
+	status       TEXT NOT NULL DEFAULT 'open',
+	requester_id TEXT,
+	assignee     TEXT,
+	tags         TEXT,
+	custom       TEXT,
+	created_at   BIGINT NOT NULL,
+	updated_at   BIGINT NOT NULL,
+	created_by   TEXT
+)`,
+		`CREATE INDEX IF NOT EXISTS idx_tickets_ws ON tickets(workspace_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_tickets_status ON tickets(workspace_id, status)`,
+		`CREATE INDEX IF NOT EXISTS idx_tickets_requester ON tickets(workspace_id, requester_id)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_tickets_ws_handle ON tickets(workspace_id, handle)`,
+	}},
+	// v13 (2026-06-08): tickets get a conversation. activities can attach to a
+	// ticket (mirroring contact_id/deal_id/company_id), so a ticket has a timeline
+	// of notes/replies. Existing rows keep a NULL ticket_id.
+	{Version: 13, Name: "ticket activities", Statements: []string{
+		`ALTER TABLE activities ADD COLUMN ticket_id TEXT`,
+		`CREATE INDEX IF NOT EXISTS idx_activities_ticket ON activities(workspace_id, ticket_id)`,
+	}},
+	// v14 (2026-06-08): tickets get a follow-up timer, mirroring contacts/deals, so
+	// a ticket (e.g. one waiting on the customer) resurfaces via GET /reminders
+	// when it's due. follow_up_at is the generic "next action due"; SLA timers
+	// come later.
+	{Version: 14, Name: "ticket follow-up", Statements: []string{
+		`ALTER TABLE tickets ADD COLUMN follow_up_at BIGINT`,
+		`ALTER TABLE tickets ADD COLUMN follow_up_note TEXT`,
+		`CREATE INDEX IF NOT EXISTS idx_tickets_followup ON tickets(workspace_id, follow_up_at)`,
+	}},
 }
 
 // MigrationState reports how the database's schema compares to the code.

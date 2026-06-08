@@ -68,7 +68,6 @@ type Store interface {
 	GetOrCreateIdentity(email string) (protocol.User, error)
 	CreateToken(userID, workspaceID, name, tokenHash string) (string, error)
 	ResolveToken(tokenHash string) (protocol.Session, error)
-	ListTokens(workspaceID string) ([]TokenInfo, error)
 	ListUserTokens(userID string) ([]TokenInfo, error)
 	RevokeToken(workspaceID, tokenID string) error
 	RevokeUserToken(userID, tokenID string) error
@@ -122,14 +121,21 @@ type Store interface {
 	UpdateDeal(ws string, d *protocol.Deal, ifMatch int64) error
 	DeleteDeal(ws, id string) error
 
+	// tickets
+	CreateTicket(ws string, t *protocol.Ticket) error
+	GetTicket(ws, id string) (protocol.Ticket, error)
+	QueryTickets(ws string, q Query) ([]protocol.Ticket, string, error)
+	UpdateTicket(ws string, t *protocol.Ticket, ifMatch int64) error
+	DeleteTicket(ws, id string) error
+
 	// reminders (due/overdue follow-ups across contacts and deals)
 	ListReminders(ws string, until time.Time, limit int) ([]protocol.Reminder, error)
 
 	// activities & audit
 	CreateActivity(ws string, a *protocol.Activity) error
 	DeleteActivity(ws, id string) error
-	ListActivities(ws, contactID, dealID, companyID string, limit int) ([]protocol.Activity, error)
-	ActivityStats(ws, contactID, dealID, companyID string) (int, time.Time, error)
+	ListActivities(ws, contactID, dealID, companyID, ticketID string, limit int) ([]protocol.Activity, error)
+	ActivityStats(ws, contactID, dealID, companyID, ticketID string) (int, time.Time, error)
 	WriteAudit(ws, tokenID, actorEmail, action, target, detail string) error
 	ListAudit(ws, actorEmail, target string, limit int) ([]AuditEntry, error)
 	PruneAuditForPlan(plan string, before int64) (int64, error)

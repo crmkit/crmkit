@@ -140,6 +140,7 @@ plans:
       max_contacts: 1000
       max_companies: 1000
       max_deals: 1000
+      max_tickets: 1000
       max_activities: 10000 # the activity log is a timeline; high backstop, not a usability quota
       audit_retention_days: 180 # security log bounded by age; per-plan, so a natural tier lever (set <0 to keep forever)
 

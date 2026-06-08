@@ -136,9 +136,9 @@ CRMKIT_EMAIL_PROVIDER=cloudflare  CRMKIT_EMAIL_CLOUDFLARE_ACCOUNT_ID=…  CRMKIT
 
 ## Data model
 
-Contacts · Companies · Deals · Activities, all workspace-scoped (multi-tenant),
-with an append-only audit log. Every entity carries a free-form `custom` JSON
-object, so the schema is extensible without server changes.
+Contacts · Companies · Deals · Tickets · Activities, all workspace-scoped
+(multi-tenant), with an append-only audit log. Every entity carries a free-form
+`custom` JSON object, so the schema is extensible without server changes.
 
 ## Plans & limits
 
@@ -157,6 +157,7 @@ GET/POST /contacts · GET/PATCH/DELETE /contacts/{id}
 GET/POST /contacts/{id}/activities
 GET/POST /companies · GET/PATCH/DELETE /companies/{id}
 GET/POST /deals · GET/PATCH/DELETE /deals/{id}
+GET/POST /tickets · GET/PATCH/DELETE /tickets/{id}
 GET /activities · GET /audit · GET /help
 ```
 

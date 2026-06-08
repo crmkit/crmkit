@@ -18,6 +18,7 @@ const (
 	KindCompany  = "company"
 	KindDeal     = "deal"
 	KindActivity = "activity"
+	KindTicket   = "ticket"
 )
 
 // idAlphabet is a lowercase, unambiguous base32 alphabet used for IDs.
@@ -260,13 +261,50 @@ type Deal struct {
 	LastActivityAt *time.Time `json:"last_activity_at,omitempty"`
 }
 
-// Reminder is a due/overdue follow-up surfaced by GET /reminders - a contact or
-// deal whose follow_up_at has arrived. Agents pull these instead of the server
-// pushing notifications.
+// Ticket is a support case: something a customer needs help with, with a status
+// and an assignee. The opening message is `content`; replies/notes (the
+// conversation) are a later addition.
+type Ticket struct {
+	ID      string `json:"id"`
+	Handle  string `json:"handle,omitempty"`  // short public reference; see Contact.Handle
+	Version int64  `json:"version,omitempty"` // optimistic-concurrency token; see Contact.Version
+	Subject string `json:"subject"`
+	Content string `json:"content,omitempty"` // the opening message / body
+	// Status is the workflow state: open | pending | solved. (on-hold, closed and
+	// the full lifecycle come later.)
+	Status string `json:"status,omitempty"`
+	// RequesterID is the contact this ticket is for (the customer). RequesterName /
+	// RequesterHandle are resolved on read for display (never persisted).
+	RequesterID     string `json:"requester_id,omitempty"`
+	RequesterName   string `json:"requester_name,omitempty"`
+	RequesterHandle string `json:"requester_handle,omitempty"`
+	// Assignee is the member (human or agent) handling the ticket - an email,
+	// mirroring `owner` on other entities.
+	Assignee string         `json:"assignee,omitempty"`
+	Tags     []string       `json:"tags,omitempty"`
+	Custom   map[string]any `json:"custom,omitempty"`
+	// FollowUpAt is when this ticket should next be acted on (e.g. nudge the
+	// customer). Send null to clear it. Due/overdue tickets surface via GET
+	// /reminders.
+	FollowUpAt   *time.Time `json:"follow_up_at,omitempty"`
+	FollowUpNote string     `json:"follow_up_note,omitempty"`
+	CreatedAt    time.Time  `json:"created_at"`
+	UpdatedAt    time.Time  `json:"updated_at"`
+	// CreatedBy is the member who opened the ticket, stamped once. Persisted.
+	CreatedBy string `json:"created_by,omitempty"`
+	// ActivityCount / LastActivityAt summarise the ticket's conversation,
+	// populated on a single-record fetch for display (never persisted).
+	ActivityCount  int        `json:"activity_count,omitempty"`
+	LastActivityAt *time.Time `json:"last_activity_at,omitempty"`
+}
+
+// Reminder is a due/overdue follow-up surfaced by GET /reminders - a contact,
+// deal, or ticket whose follow_up_at has arrived. Agents pull these instead of
+// the server pushing notifications.
 type Reminder struct {
-	Handle     string    `json:"handle"` // contact/c_… or deal/d_…
-	Kind       string    `json:"kind"`   // contact | deal
-	Title      string    `json:"title"`  // contact name or deal title
+	Handle     string    `json:"handle"` // e.g. contact_k7m2q / deal_… / ticket_…
+	Kind       string    `json:"kind"`   // contact | deal | ticket
+	Title      string    `json:"title"`  // contact name, deal title, or ticket subject
 	Email      string    `json:"email,omitempty"`
 	FollowUpAt time.Time `json:"follow_up_at"`
 	Note       string    `json:"note,omitempty"`
@@ -281,11 +319,13 @@ type Activity struct {
 	ContactID string `json:"contact_id,omitempty"`
 	DealID    string `json:"deal_id,omitempty"`
 	CompanyID string `json:"company_id,omitempty"`
-	// ContactHandle/DealHandle/CompanyHandle are the resolved public handles of
-	// the relation ids, populated on read for display (never persisted).
+	TicketID  string `json:"ticket_id,omitempty"`
+	// ContactHandle/DealHandle/CompanyHandle/TicketHandle are the resolved public
+	// handles of the relation ids, populated on read for display (never persisted).
 	ContactHandle string    `json:"contact_handle,omitempty"`
 	DealHandle    string    `json:"deal_handle,omitempty"`
 	CompanyHandle string    `json:"company_handle,omitempty"`
+	TicketHandle  string    `json:"ticket_handle,omitempty"`
 	Kind          string    `json:"kind"` // note | call | email | meeting | task
 	Body          string    `json:"body"`
 	CreatedBy     string    `json:"created_by,omitempty"`
@@ -343,6 +383,15 @@ func (d Deal) Localized(loc *time.Location) Deal {
 func (a Activity) Localized(loc *time.Location) Activity {
 	a.CreatedAt = inLoc(a.CreatedAt, loc)
 	return a
+}
+
+// Localized returns a copy of the ticket with its instants expressed in loc.
+func (t Ticket) Localized(loc *time.Location) Ticket {
+	t.CreatedAt = inLoc(t.CreatedAt, loc)
+	t.UpdatedAt = inLoc(t.UpdatedAt, loc)
+	t.FollowUpAt = inLocPtr(t.FollowUpAt, loc)
+	t.LastActivityAt = inLocPtr(t.LastActivityAt, loc)
+	return t
 }
 
 // Localized returns a copy of the reminder with its instant expressed in loc.

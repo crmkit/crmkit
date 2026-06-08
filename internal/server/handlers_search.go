@@ -17,15 +17,15 @@ import (
 // (e.g. GET /contacts?search=) for the full, paginated view.
 const searchPerType = 5
 
-// handleSearch runs a fuzzy term across contacts, companies and deals at once -
-// the "find anything" entry point - and returns grouped results. Scope it with
-// ?types=contacts,companies,deals (default: all three).
+// handleSearch runs a fuzzy term across contacts, companies, deals and tickets
+// at once - the "find anything" entry point - and returns grouped results. Scope
+// it with ?types=contacts,companies,deals,tickets (default: all).
 func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	sess := sessionFrom(r)
 	term := strings.TrimSpace(r.URL.Query().Get("q"))
 	if term == "" {
 		render.Error(w, r, http.StatusBadRequest, "missing_query",
-			`Pass a search term, e.g. /search?q=acme. Optionally scope with &types=contacts,companies,deals.`)
+			`Pass a search term, e.g. /search?q=acme. Optionally scope with &types=contacts,companies,deals,tickets.`)
 		return
 	}
 	want := parseSearchTypes(r.URL.Query().Get("types"))
@@ -33,6 +33,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	contacts := []protocol.Contact{}
 	companies := []protocol.Company{}
 	deals := []protocol.Deal{}
+	tickets := []protocol.Ticket{}
 
 	if want["contacts"] {
 		list, _, err := s.store.QueryContacts(sess.WorkspaceID, searchQuery(contactQuery, term))
@@ -58,14 +59,23 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		}
 		deals = list
 	}
+	if want["tickets"] {
+		list, _, err := s.store.QueryTickets(sess.WorkspaceID, searchQuery(ticketQuery, term))
+		if err != nil {
+			s.serverErr(w, r)
+			return
+		}
+		tickets = list
+	}
 
 	loc := locationOf(sess)
 	contacts = localizedSlice(contacts, loc)
 	companies = localizedSlice(companies, loc)
 	deals = localizedSlice(deals, loc)
+	tickets = localizedSlice(tickets, loc)
 
-	text := render.SearchResults(term, contacts, companies, deals)
-	if len(contacts) == searchPerType || len(companies) == searchPerType || len(deals) == searchPerType {
+	text := render.SearchResults(term, contacts, companies, deals, tickets)
+	if len(contacts) == searchPerType || len(companies) == searchPerType || len(deals) == searchPerType || len(tickets) == searchPerType {
 		text += "\n# tip: showing up to " + strconv.Itoa(searchPerType) +
 			" per type; narrow with the typed endpoint, e.g. GET /contacts?search=" + url.QueryEscape(term)
 	}
@@ -74,6 +84,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		"contacts":  contacts,
 		"companies": companies,
 		"deals":     deals,
+		"tickets":   tickets,
 	}, text)
 }
 
@@ -94,7 +105,7 @@ func searchQuery(cfg queryConfig, term string) store.Query {
 // types to search. Empty or all-unrecognized falls back to all three, so a
 // malformed scope still returns useful results rather than nothing.
 func parseSearchTypes(raw string) map[string]bool {
-	all := map[string]bool{"contacts": true, "companies": true, "deals": true}
+	all := map[string]bool{"contacts": true, "companies": true, "deals": true, "tickets": true}
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return all

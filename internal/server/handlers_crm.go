@@ -83,6 +83,7 @@ var auditKinds = map[string]bool{
 	protocol.KindContact: true,
 	protocol.KindCompany: true,
 	protocol.KindDeal:    true,
+	protocol.KindTicket:  true,
 }
 
 // resolveAuditTarget turns a record reference (a handle like "contact_k7m2q")
@@ -242,7 +243,7 @@ func (s *Server) handleGetContact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Best-effort activity summary; a stats hiccup must not fail the fetch.
-	if n, last, err := s.store.ActivityStats(sess.WorkspaceID, c.ID, "", ""); err == nil {
+	if n, last, err := s.store.ActivityStats(sess.WorkspaceID, c.ID, "", "", ""); err == nil {
 		c.ActivityCount = n
 		if !last.IsZero() {
 			c.LastActivityAt = &last
@@ -317,7 +318,7 @@ func (s *Server) handleListContactActivities(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	limit := render.Int(r.URL.Query().Get("limit"), 50)
-	list, err := s.store.ListActivities(sess.WorkspaceID, id, "", "", limit)
+	list, err := s.store.ListActivities(sess.WorkspaceID, id, "", "", "", limit)
 	if err != nil {
 		s.serverErr(w, r)
 		return
@@ -363,7 +364,7 @@ func (s *Server) handleListCompanyActivities(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	limit := render.Int(r.URL.Query().Get("limit"), 50)
-	list, err := s.store.ListActivities(sess.WorkspaceID, "", "", id, limit)
+	list, err := s.store.ListActivities(sess.WorkspaceID, "", "", id, "", limit)
 	if err != nil {
 		s.serverErr(w, r)
 		return
@@ -499,7 +500,7 @@ func (s *Server) handleGetCompany(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Best-effort activity summary; a stats hiccup must not fail the fetch.
-	if n, last, err := s.store.ActivityStats(sess.WorkspaceID, "", "", c.ID); err == nil {
+	if n, last, err := s.store.ActivityStats(sess.WorkspaceID, "", "", c.ID, ""); err == nil {
 		c.ActivityCount = n
 		if !last.IsZero() {
 			c.LastActivityAt = &last
@@ -624,7 +625,7 @@ func (s *Server) handleGetDeal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Best-effort activity summary; a stats hiccup must not fail the fetch.
-	if n, last, err := s.store.ActivityStats(sess.WorkspaceID, "", d.ID, ""); err == nil {
+	if n, last, err := s.store.ActivityStats(sess.WorkspaceID, "", d.ID, "", ""); err == nil {
 		d.ActivityCount = n
 		if !last.IsZero() {
 			d.LastActivityAt = &last
@@ -690,6 +691,199 @@ func (s *Server) handleDeleteDeal(w http.ResponseWriter, r *http.Request) {
 	render.Text(w, r, http.StatusOK, "OK deleted "+r.PathValue("id"))
 }
 
+// ---- tickets -------------------------------------------------------------
+
+// validTicketStatus reports whether s is an allowed ticket status. Empty is
+// accepted (create defaults it to "open"). The lifecycle is open/pending/solved
+// for now; on-hold/closed come later.
+func validTicketStatus(s string) bool {
+	switch s {
+	case "", "open", "pending", "solved":
+		return true
+	}
+	return false
+}
+
+func (s *Server) handleListTickets(w http.ResponseWriter, r *http.Request) {
+	sess := sessionFrom(r)
+	q, err := parseListQuery(r, ticketQuery)
+	if err != nil {
+		s.writeQueryError(w, r, err)
+		return
+	}
+	list, next, err := s.store.QueryTickets(sess.WorkspaceID, q)
+	if err != nil {
+		s.serverErr(w, r)
+		return
+	}
+	list = localizedSlice(list, locationOf(sess))
+	s.respondList(w, r, list, render.Tickets(list), next)
+}
+
+func (s *Server) handleCreateTicket(w http.ResponseWriter, r *http.Request) {
+	sess := sessionFrom(r)
+	var t protocol.Ticket
+	if err := decodeJSON(r, &t); err != nil {
+		render.Error(w, r, http.StatusBadRequest, "bad_request",
+			`Send JSON, e.g. {"subject":"Can't log in","content":"...","requester_id":"contact_...","status":"open"}.`)
+		return
+	}
+	if strings.TrimSpace(t.Subject) == "" {
+		render.Error(w, r, http.StatusBadRequest, "missing_field", `"subject" is required to create a ticket.`)
+		return
+	}
+	if !validTicketStatus(t.Status) {
+		render.Error(w, r, http.StatusBadRequest, "invalid_field", `"status" must be one of: open, pending, solved.`)
+		return
+	}
+	if !s.enforceWorkspaceQuota(w, r, sess.WorkspaceID, "tickets") {
+		return
+	}
+	t.CreatedBy = sess.Email // stamp the actor; never trust a client-supplied value
+	t.RequesterID = s.relationID(sess.WorkspaceID, protocol.KindContact, t.RequesterID)
+	if err := s.store.CreateTicket(sess.WorkspaceID, &t); err != nil {
+		s.serverErr(w, r)
+		return
+	}
+	s.audit(sess, "ticket.create", protocol.Handle(protocol.KindTicket, t.ID), t.Subject)
+	t = t.Localized(locationOf(sess))
+	render.Respond(w, r, http.StatusCreated, t, render.Ticket(t))
+}
+
+func (s *Server) handleGetTicket(w http.ResponseWriter, r *http.Request) {
+	sess := sessionFrom(r)
+	id, ok := s.resolveID(w, r, protocol.KindTicket)
+	if !ok {
+		return
+	}
+	t, err := s.store.GetTicket(sess.WorkspaceID, id)
+	if errors.Is(err, store.ErrNotFound) {
+		s.notFound(w, r, "ticket")
+		return
+	}
+	if err != nil {
+		s.serverErr(w, r)
+		return
+	}
+	// Best-effort conversation summary; a stats hiccup must not fail the fetch.
+	if n, last, err := s.store.ActivityStats(sess.WorkspaceID, "", "", "", t.ID); err == nil {
+		t.ActivityCount = n
+		if !last.IsZero() {
+			t.LastActivityAt = &last
+		}
+	}
+	t = t.Localized(locationOf(sess))
+	render.Respond(w, r, http.StatusOK, t, render.Ticket(t))
+}
+
+// handleListTicketActivities returns a ticket's conversation (its activity
+// timeline).
+func (s *Server) handleListTicketActivities(w http.ResponseWriter, r *http.Request) {
+	sess := sessionFrom(r)
+	id, ok := s.resolveID(w, r, protocol.KindTicket)
+	if !ok {
+		return
+	}
+	limit := render.Int(r.URL.Query().Get("limit"), 50)
+	list, err := s.store.ListActivities(sess.WorkspaceID, "", "", "", id, limit)
+	if err != nil {
+		s.serverErr(w, r)
+		return
+	}
+	list = localizedSlice(list, locationOf(sess))
+	s.respondList(w, r, list, render.Activities(list), "")
+}
+
+func (s *Server) handleCreateTicketActivity(w http.ResponseWriter, r *http.Request) {
+	sess := sessionFrom(r)
+	id, ok := s.resolveID(w, r, protocol.KindTicket)
+	if !ok {
+		return
+	}
+	var a protocol.Activity
+	if err := decodeJSON(r, &a); err != nil {
+		render.Error(w, r, http.StatusBadRequest, "bad_request",
+			`Send JSON, e.g. {"kind":"note","body":"Asked for logs"}. kind is one of note|call|email|meeting|task.`)
+		return
+	}
+	if strings.TrimSpace(a.Body) == "" {
+		render.Error(w, r, http.StatusBadRequest, "missing_field", `"body" is required to log an activity.`)
+		return
+	}
+	if !s.enforceWorkspaceQuota(w, r, sess.WorkspaceID, "activities") {
+		return
+	}
+	a.TicketID = id
+	a.CreatedBy = sess.Email
+	if err := s.store.CreateActivity(sess.WorkspaceID, &a); err != nil {
+		s.serverErr(w, r)
+		return
+	}
+	s.audit(sess, "activity.create", protocol.Handle(protocol.KindActivity, a.ID), a.Kind)
+	a = a.Localized(locationOf(sess))
+	render.Respond(w, r, http.StatusCreated, a, render.ActivityLine(a))
+}
+
+func (s *Server) handleUpdateTicket(w http.ResponseWriter, r *http.Request) {
+	sess := sessionFrom(r)
+	id, ok := s.resolveID(w, r, protocol.KindTicket)
+	if !ok {
+		return
+	}
+	t, err := s.store.GetTicket(sess.WorkspaceID, id)
+	if errors.Is(err, store.ErrNotFound) {
+		s.notFound(w, r, "ticket")
+		return
+	}
+	if err != nil {
+		s.serverErr(w, r)
+		return
+	}
+	before := t
+	before.Tags = append([]string(nil), t.Tags...)
+	body, err := readBody(r)
+	if err != nil {
+		render.Error(w, r, http.StatusBadRequest, "bad_request", "Could not read the request body.")
+		return
+	}
+	if err := decodeBytes(body, &t); err != nil {
+		render.Error(w, r, http.StatusBadRequest, "bad_request",
+			`Send a JSON object with only the fields you want to change, e.g. {"status":"solved"}.`)
+		return
+	}
+	if !validTicketStatus(t.Status) {
+		render.Error(w, r, http.StatusBadRequest, "invalid_field", `"status" must be one of: open, pending, solved.`)
+		return
+	}
+	t.RequesterID = s.relationID(sess.WorkspaceID, protocol.KindContact, t.RequesterID)
+	if s.writeUpdateErr(w, r, "ticket", s.store.UpdateTicket(sess.WorkspaceID, &t, expectedVersion(r, body))) {
+		return
+	}
+	s.audit(sess, "ticket.update", protocol.Handle(protocol.KindTicket, t.ID), diffTicket(before, t))
+	t = t.Localized(locationOf(sess))
+	render.Respond(w, r, http.StatusOK, t, render.Ticket(t))
+}
+
+func (s *Server) handleDeleteTicket(w http.ResponseWriter, r *http.Request) {
+	sess := sessionFrom(r)
+	id, ok := s.resolveID(w, r, protocol.KindTicket)
+	if !ok {
+		return
+	}
+	if !s.requireConfirm(w, r, protocol.KindTicket, id) {
+		return
+	}
+	if err := s.store.DeleteTicket(sess.WorkspaceID, id); errors.Is(err, store.ErrNotFound) {
+		s.notFound(w, r, "ticket")
+		return
+	} else if err != nil {
+		s.serverErr(w, r)
+		return
+	}
+	s.audit(sess, "ticket.delete", protocol.Handle(protocol.KindTicket, id), "")
+	render.Text(w, r, http.StatusOK, "OK deleted "+r.PathValue("id"))
+}
+
 // ---- reminders -----------------------------------------------------------
 
 func (s *Server) handleListReminders(w http.ResponseWriter, r *http.Request) {
@@ -718,7 +912,8 @@ func (s *Server) handleListActivities(w http.ResponseWriter, r *http.Request) {
 	contactID := s.relationID(sess.WorkspaceID, protocol.KindContact, q.Get("contact"))
 	dealID := s.relationID(sess.WorkspaceID, protocol.KindDeal, q.Get("deal"))
 	companyID := s.relationID(sess.WorkspaceID, protocol.KindCompany, q.Get("company"))
-	list, err := s.store.ListActivities(sess.WorkspaceID, contactID, dealID, companyID, render.Int(q.Get("limit"), 50))
+	ticketID := s.relationID(sess.WorkspaceID, protocol.KindTicket, q.Get("ticket"))
+	list, err := s.store.ListActivities(sess.WorkspaceID, contactID, dealID, companyID, ticketID, render.Int(q.Get("limit"), 50))
 	if err != nil {
 		s.serverErr(w, r)
 		return

@@ -19,6 +19,7 @@ var handleTable = map[string]string{
 	protocol.KindCompany:  "companies",
 	protocol.KindDeal:     "deals",
 	protocol.KindActivity: "activities",
+	protocol.KindTicket:   "tickets",
 }
 
 // genHandle runs insert(handle) with a freshly generated short handle, retrying
@@ -421,6 +422,152 @@ func scanDeal(sc scanner) (protocol.Deal, error) {
 	return d, nil
 }
 
+// ---- tickets -------------------------------------------------------------
+
+// CreateTicket inserts a ticket. ID/handle/version/timestamps are assigned.
+func (s *sqlStore) CreateTicket(ws string, t *protocol.Ticket) error {
+	now := time.Now()
+	if t.ID == "" {
+		t.ID = protocol.NewID("t")
+	}
+	if t.Status == "" {
+		t.Status = "open"
+	}
+	t.CreatedAt, t.UpdatedAt = now, now
+	t.Version = 1
+	tags, err := marshalTags(t.Tags)
+	if err != nil {
+		return err
+	}
+	custom, err := marshalJSON(t.Custom)
+	if err != nil {
+		return err
+	}
+	t.Handle, err = s.genHandle(func(handle string) error {
+		_, e := s.exec(`
+INSERT INTO tickets (id, workspace_id, handle, subject, content, status, requester_id, assignee, tags, custom, follow_up_at, follow_up_note, created_at, updated_at, created_by)
+VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			t.ID, ws, handle, t.Subject, t.Content, t.Status, t.RequesterID, t.Assignee, tags, custom,
+			nullableUnix(t.FollowUpAt), t.FollowUpNote, unix(now), unix(now), t.CreatedBy)
+		return e
+	})
+	if err != nil {
+		return err
+	}
+	return s.fillTicketRef(ws, t)
+}
+
+const ticketColumns = `id, handle, version, subject, content, status, requester_id, assignee, tags, custom, follow_up_at, follow_up_note, created_at, updated_at, created_by`
+
+// GetTicket loads one ticket scoped to the workspace.
+func (s *sqlStore) GetTicket(ws, id string) (protocol.Ticket, error) {
+	row := s.queryRow(`SELECT `+ticketColumns+` FROM tickets WHERE workspace_id = ? AND id = ?`, ws, id)
+	t, err := scanTicket(row)
+	if err != nil {
+		return protocol.Ticket{}, err
+	}
+	if err := s.fillTicketRef(ws, &t); err != nil {
+		return protocol.Ticket{}, err
+	}
+	return t, nil
+}
+
+// UpdateTicket overwrites mutable ticket fields, bumps updated_at, and increments
+// version. See UpdateContact for the ifMatch (optimistic-concurrency) semantics.
+func (s *sqlStore) UpdateTicket(ws string, t *protocol.Ticket, ifMatch int64) error {
+	t.UpdatedAt = time.Now()
+	tags, err := marshalTags(t.Tags)
+	if err != nil {
+		return err
+	}
+	custom, err := marshalJSON(t.Custom)
+	if err != nil {
+		return err
+	}
+	res, err := s.exec(`
+UPDATE tickets SET subject=?, content=?, status=?, requester_id=?, assignee=?, tags=?, custom=?, follow_up_at=?, follow_up_note=?, updated_at=?, version = version + 1
+WHERE workspace_id = ? AND id = ? AND (? <= 0 OR version = ?)`,
+		t.Subject, t.Content, t.Status, t.RequesterID, t.Assignee, tags, custom,
+		nullableUnix(t.FollowUpAt), t.FollowUpNote, unix(t.UpdatedAt), ws, t.ID, ifMatch, ifMatch)
+	if err != nil {
+		return err
+	}
+	if err := s.checkConditional(res, ws, "tickets", t.ID, ifMatch); err != nil {
+		return err
+	}
+	if err := s.reloadVersion(ws, "tickets", t.ID, &t.Version); err != nil {
+		return err
+	}
+	return s.fillTicketRef(ws, t)
+}
+
+// DeleteTicket removes a ticket from a workspace.
+func (s *sqlStore) DeleteTicket(ws, id string) error {
+	res, err := s.exec(`DELETE FROM tickets WHERE workspace_id = ? AND id = ?`, ws, id)
+	if err != nil {
+		return err
+	}
+	return affectedOne(res)
+}
+
+func scanTicket(sc scanner) (protocol.Ticket, error) {
+	var (
+		t                     protocol.Ticket
+		content, status       sql.NullString
+		requesterID, assignee sql.NullString
+		tags, custom          sql.NullString
+		followNote, createdBy sql.NullString
+		followAt              sql.NullInt64
+		created, upd          int64
+	)
+	err := sc.Scan(&t.ID, &t.Handle, &t.Version, &t.Subject, &content, &status, &requesterID, &assignee, &tags, &custom, &followAt, &followNote, &created, &upd, &createdBy)
+	if errors.Is(err, sql.ErrNoRows) {
+		return protocol.Ticket{}, ErrNotFound
+	}
+	if err != nil {
+		return protocol.Ticket{}, err
+	}
+	t.Content, t.Status = content.String, status.String
+	t.RequesterID, t.Assignee = requesterID.String, assignee.String
+	t.Tags = unmarshalTags(tags.String)
+	t.Custom = unmarshalCustom(custom.String)
+	t.FollowUpAt = fromNullableUnix(followAt)
+	t.FollowUpNote = followNote.String
+	t.CreatedAt, t.UpdatedAt = fromUnix(created), fromUnix(upd)
+	t.CreatedBy = createdBy.String
+	return t, nil
+}
+
+// fillTicketRefs resolves each ticket's requester_id to a contact name + handle.
+func (s *sqlStore) fillTicketRefs(ws string, tickets []protocol.Ticket) error {
+	ids := make([]string, 0, len(tickets))
+	for _, t := range tickets {
+		ids = append(ids, t.RequesterID)
+	}
+	names, err := s.namesByID(ws, "contacts", ids)
+	if err != nil {
+		return err
+	}
+	handles, err := s.handlesByID(ws, "contacts", ids)
+	if err != nil {
+		return err
+	}
+	for i := range tickets {
+		tickets[i].RequesterName = names[tickets[i].RequesterID]
+		tickets[i].RequesterHandle = handles[tickets[i].RequesterID]
+	}
+	return nil
+}
+
+func (s *sqlStore) fillTicketRef(ws string, t *protocol.Ticket) error {
+	one := []protocol.Ticket{*t}
+	if err := s.fillTicketRefs(ws, one); err != nil {
+		return err
+	}
+	*t = one[0]
+	return nil
+}
+
 // ---- reminders -----------------------------------------------------------
 
 // ListReminders returns contacts and deals whose follow_up_at is at or before
@@ -488,7 +635,34 @@ WHERE workspace_id = ? AND follow_up_at IS NOT NULL AND follow_up_at <= ? ORDER 
 		return nil, err
 	}
 
-	// Merge the two streams by due time, soonest first, and cap at limit.
+	trows, err := s.query(`SELECT id, handle, subject, follow_up_at, follow_up_note FROM tickets
+WHERE workspace_id = ? AND follow_up_at IS NOT NULL AND follow_up_at <= ? ORDER BY follow_up_at ASC LIMIT ?`,
+		ws, unix(until), limit)
+	if err != nil {
+		return nil, err
+	}
+	for trows.Next() {
+		var (
+			id, handle, subject string
+			note                sql.NullString
+			fa                  int64
+		)
+		if err := trows.Scan(&id, &handle, &subject, &fa, &note); err != nil {
+			trows.Close()
+			return nil, err
+		}
+		t := fromUnix(fa)
+		out = append(out, protocol.Reminder{
+			Handle: protocol.FormatRef(protocol.KindTicket, handle), Kind: protocol.KindTicket,
+			Title: subject, FollowUpAt: t, Note: note.String, Overdue: t.Before(now),
+		})
+	}
+	trows.Close()
+	if err := trows.Err(); err != nil {
+		return nil, err
+	}
+
+	// Merge the streams by due time, soonest first, and cap at limit.
 	sort.Slice(out, func(i, j int) bool { return out[i].FollowUpAt.Before(out[j].FollowUpAt) })
 	if len(out) > limit {
 		out = out[:limit]
@@ -511,8 +685,8 @@ func (s *sqlStore) CreateActivity(ws string, a *protocol.Activity) error {
 	var err error
 	a.Handle, err = s.genHandle(func(handle string) error {
 		_, e := s.exec(`
-INSERT INTO activities (id, workspace_id, handle, contact_id, deal_id, company_id, kind, body, created_by, created_at)
-VALUES (?,?,?,?,?,?,?,?,?,?)`, a.ID, ws, handle, a.ContactID, a.DealID, a.CompanyID, a.Kind, a.Body, a.CreatedBy, unix(now))
+INSERT INTO activities (id, workspace_id, handle, contact_id, deal_id, company_id, ticket_id, kind, body, created_by, created_at)
+VALUES (?,?,?,?,?,?,?,?,?,?,?)`, a.ID, ws, handle, a.ContactID, a.DealID, a.CompanyID, a.TicketID, a.Kind, a.Body, a.CreatedBy, unix(now))
 		return e
 	})
 	return err
@@ -529,14 +703,14 @@ func (s *sqlStore) DeleteActivity(ws, id string) error {
 }
 
 // ListActivities returns activities for a workspace, optionally filtered by
-// contact, deal, or company, newest first.
-func (s *sqlStore) ListActivities(ws, contactID, dealID, companyID string, limit int) ([]protocol.Activity, error) {
+// contact, deal, company, or ticket, newest first.
+func (s *sqlStore) ListActivities(ws, contactID, dealID, companyID, ticketID string, limit int) ([]protocol.Activity, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 50
 	}
 	args := []any{ws}
 	sb := strings.Builder{}
-	sb.WriteString(`SELECT id, handle, contact_id, deal_id, company_id, kind, body, created_by, created_at FROM activities WHERE workspace_id = ?`)
+	sb.WriteString(`SELECT id, handle, contact_id, deal_id, company_id, ticket_id, kind, body, created_by, created_at FROM activities WHERE workspace_id = ?`)
 	if contactID != "" {
 		sb.WriteString(` AND contact_id = ?`)
 		args = append(args, contactID)
@@ -548,6 +722,10 @@ func (s *sqlStore) ListActivities(ws, contactID, dealID, companyID string, limit
 	if companyID != "" {
 		sb.WriteString(` AND company_id = ?`)
 		args = append(args, companyID)
+	}
+	if ticketID != "" {
+		sb.WriteString(` AND ticket_id = ?`)
+		args = append(args, ticketID)
 	}
 	sb.WriteString(` ORDER BY created_at DESC LIMIT ?`)
 	args = append(args, limit)
@@ -561,14 +739,14 @@ func (s *sqlStore) ListActivities(ws, contactID, dealID, companyID string, limit
 	out := []protocol.Activity{} // non-nil so an empty list serializes as [] not null
 	for rows.Next() {
 		var (
-			a                                 protocol.Activity
-			contact, deal, company, createdBy sql.NullString
-			created                           int64
+			a                                         protocol.Activity
+			contact, deal, company, ticket, createdBy sql.NullString
+			created                                   int64
 		)
-		if err := rows.Scan(&a.ID, &a.Handle, &contact, &deal, &company, &a.Kind, &a.Body, &createdBy, &created); err != nil {
+		if err := rows.Scan(&a.ID, &a.Handle, &contact, &deal, &company, &ticket, &a.Kind, &a.Body, &createdBy, &created); err != nil {
 			return nil, err
 		}
-		a.ContactID, a.DealID, a.CompanyID, a.CreatedBy = contact.String, deal.String, company.String, createdBy.String
+		a.ContactID, a.DealID, a.CompanyID, a.TicketID, a.CreatedBy = contact.String, deal.String, company.String, ticket.String, createdBy.String
 		a.CreatedAt = fromUnix(created)
 		out = append(out, a)
 	}
@@ -584,7 +762,7 @@ func (s *sqlStore) ListActivities(ws, contactID, dealID, companyID string, limit
 // ActivityStats returns the activity count and most-recent activity time for a
 // contact or deal (whichever id is non-empty) - used to annotate a single-record
 // fetch. Returns 0 + zero time when there are none.
-func (s *sqlStore) ActivityStats(ws, contactID, dealID, companyID string) (int, time.Time, error) {
+func (s *sqlStore) ActivityStats(ws, contactID, dealID, companyID, ticketID string) (int, time.Time, error) {
 	args := []any{ws}
 	sb := strings.Builder{}
 	sb.WriteString(`SELECT count(*), coalesce(max(created_at), 0) FROM activities WHERE workspace_id = ?`)
@@ -599,6 +777,10 @@ func (s *sqlStore) ActivityStats(ws, contactID, dealID, companyID string) (int, 
 	if companyID != "" {
 		sb.WriteString(` AND company_id = ?`)
 		args = append(args, companyID)
+	}
+	if ticketID != "" {
+		sb.WriteString(` AND ticket_id = ?`)
+		args = append(args, ticketID)
 	}
 	var (
 		count int
@@ -819,6 +1001,8 @@ func kindForTable(table string) string {
 		return protocol.KindCompany
 	case "deals":
 		return protocol.KindDeal
+	case "tickets":
+		return protocol.KindTicket
 	default:
 		return protocol.KindActivity
 	}
@@ -922,10 +1106,12 @@ func (s *sqlStore) fillActivityRefs(ws string, acts []protocol.Activity) error {
 	contactIDs := make([]string, 0, len(acts))
 	dealIDs := make([]string, 0, len(acts))
 	companyIDs := make([]string, 0, len(acts))
+	ticketIDs := make([]string, 0, len(acts))
 	for _, a := range acts {
 		contactIDs = append(contactIDs, a.ContactID)
 		dealIDs = append(dealIDs, a.DealID)
 		companyIDs = append(companyIDs, a.CompanyID)
+		ticketIDs = append(ticketIDs, a.TicketID)
 	}
 	contactHandles, err := s.handlesByID(ws, "contacts", contactIDs)
 	if err != nil {
@@ -939,10 +1125,15 @@ func (s *sqlStore) fillActivityRefs(ws string, acts []protocol.Activity) error {
 	if err != nil {
 		return err
 	}
+	ticketHandles, err := s.handlesByID(ws, "tickets", ticketIDs)
+	if err != nil {
+		return err
+	}
 	for i := range acts {
 		acts[i].ContactHandle = contactHandles[acts[i].ContactID]
 		acts[i].DealHandle = dealHandles[acts[i].DealID]
 		acts[i].CompanyHandle = companyHandles[acts[i].CompanyID]
+		acts[i].TicketHandle = ticketHandles[acts[i].TicketID]
 	}
 	return nil
 }

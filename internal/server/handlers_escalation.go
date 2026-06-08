@@ -39,7 +39,11 @@ func stepUpCode(r *http.Request) string {
 func (s *Server) requireEscalation(w http.ResponseWriter, r *http.Request, sess protocol.Session, action, target, desc string) bool {
 	code := stepUpCode(r)
 	if code == "" {
-		c := auth.GenerateCode()
+		c, err := auth.GenerateCode()
+		if err != nil {
+			s.serverErr(w, r)
+			return false
+		}
 		if err := s.store.PutEscalation(sess.UserID, action, target,
 			auth.HashStepUp(s.cfg.Server.SecretKey, sess.UserID, action, target, c), time.Now().Add(s.escalationTTL())); err != nil {
 			s.serverErr(w, r)

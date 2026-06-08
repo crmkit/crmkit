@@ -11,25 +11,25 @@ import (
 // SHA-256 hash. Only the hash is stored; the plaintext is handed to the client
 // via the redirect and exchanged once at the token endpoint. The "cka_" prefix
 // distinguishes it from an access token ("ck_") in logs.
-func GenerateOAuthCode() (plaintext, hash string) {
+func GenerateOAuthCode() (plaintext, hash string, err error) {
 	buf := make([]byte, 24)
 	if _, err := rand.Read(buf); err != nil {
-		return "", ""
+		return "", "", err
 	}
 	plaintext = "cka_" + tokenEncoding.EncodeToString(buf)
-	return plaintext, HashToken(plaintext)
+	return plaintext, HashToken(plaintext), nil
 }
 
 // GenerateRefreshToken returns a new opaque OAuth refresh token and its SHA-256
 // hash. Only the hash is stored. The "ckr_" prefix distinguishes it from an
 // access token ("ck_") and an authorization code ("cka_") in logs.
-func GenerateRefreshToken() (plaintext, hash string) {
+func GenerateRefreshToken() (plaintext, hash string, err error) {
 	buf := make([]byte, 24)
 	if _, err := rand.Read(buf); err != nil {
-		return "", ""
+		return "", "", err
 	}
 	plaintext = "ckr_" + tokenEncoding.EncodeToString(buf)
-	return plaintext, HashToken(plaintext)
+	return plaintext, HashToken(plaintext), nil
 }
 
 // VerifyPKCE checks a PKCE code_verifier against the stored code_challenge per

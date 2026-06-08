@@ -123,7 +123,7 @@ func Contact(c protocol.Contact) string {
 // SearchResults renders grouped cross-entity search hits: a section per
 // non-empty type (reusing the per-entity line format) and a combined summary
 // naming the query, so an agent can grep by handle or by type header.
-func SearchResults(query string, contacts []protocol.Contact, companies []protocol.Company, deals []protocol.Deal) string {
+func SearchResults(query string, contacts []protocol.Contact, companies []protocol.Company, deals []protocol.Deal, tickets []protocol.Ticket) string {
 	b := strings.Builder{}
 	if len(contacts) > 0 {
 		b.WriteString("# contacts\n")
@@ -146,8 +146,15 @@ func SearchResults(query string, contacts []protocol.Contact, companies []protoc
 			b.WriteByte('\n')
 		}
 	}
-	fmt.Fprintf(&b, "# %d contact(s), %d company(ies), %d deal(s) for %q",
-		len(contacts), len(companies), len(deals), query)
+	if len(tickets) > 0 {
+		b.WriteString("# tickets\n")
+		for _, t := range tickets {
+			b.WriteString(TicketLine(t))
+			b.WriteByte('\n')
+		}
+	}
+	fmt.Fprintf(&b, "# %d contact(s), %d company(ies), %d deal(s), %d ticket(s) for %q",
+		len(contacts), len(companies), len(deals), len(tickets), query)
 	return b.String()
 }
 
@@ -249,6 +256,56 @@ func Deal(d protocol.Deal) string {
 	return Record(fields...)
 }
 
+// ---- tickets -------------------------------------------------------------
+
+// TicketLine renders a ticket as one grepable line.
+func TicketLine(t protocol.Ticket) string {
+	return Line(protocol.FormatRef(protocol.KindTicket, t.Handle),
+		F("subject", t.Subject),
+		F("status", t.Status),
+		F("requester", nameOrID(t.RequesterName, t.RequesterHandle)),
+		F("assignee", t.Assignee),
+		F("tags", strings.Join(t.Tags, ",")),
+		F("followup", datep(t.FollowUpAt)),
+		F("updated", date(t.UpdatedAt)),
+	)
+}
+
+// Tickets renders a list of tickets with a trailing count summary.
+func Tickets(list []protocol.Ticket) string {
+	b := strings.Builder{}
+	for _, t := range list {
+		b.WriteString(TicketLine(t))
+		b.WriteByte('\n')
+	}
+	fmt.Fprintf(&b, "# %d ticket(s)", len(list))
+	return b.String()
+}
+
+// Ticket renders a full ticket detail block.
+func Ticket(t protocol.Ticket) string {
+	fields := []Field{
+		F("handle", protocol.FormatRef(protocol.KindTicket, t.Handle)),
+		F("version", verStr(t.Version)),
+		F("subject", t.Subject),
+		F("status", t.Status),
+		F("requester", t.RequesterName),
+		F("requester_ref", t.RequesterHandle),
+		F("assignee", t.Assignee),
+		F("tags", strings.Join(t.Tags, ", ")),
+		F("content", t.Content),
+		F("follow_up", datep(t.FollowUpAt)),
+		F("follow_up_note", t.FollowUpNote),
+		F("created", date(t.CreatedAt)),
+		F("created_by", t.CreatedBy),
+		F("updated", date(t.UpdatedAt)),
+		F("activities", countField(t.ActivityCount)),
+		F("last_activity", datep(t.LastActivityAt)),
+	}
+	fields = append(fields, customFields(t.Custom)...)
+	return Record(fields...)
+}
+
 // ---- activities ----------------------------------------------------------
 
 // ActivityLine renders an activity as one grepable line.
@@ -259,6 +316,7 @@ func ActivityLine(a protocol.Activity) string {
 		F("contact", a.ContactHandle),
 		F("deal", a.DealHandle),
 		F("company", a.CompanyHandle),
+		F("ticket", a.TicketHandle),
 		F("at", date(a.CreatedAt)),
 		F("body", a.Body),
 	)

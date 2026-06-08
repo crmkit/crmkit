@@ -316,3 +316,19 @@ var dealQuery = queryConfig{
 	defSort: "updated_at",
 	custom:  true,
 }
+
+var ticketQuery = queryConfig{
+	filter: map[string]colSpec{
+		"subject": {"subject", colText}, "status": {"status", colText},
+		"requester_id": {"requester_id", colText}, "assignee": {"assignee", colText},
+		"created_by": {"created_by", colText},
+		"created_at": {"created_at", colTime}, "updated_at": {"updated_at", colTime}, "follow_up_at": {"follow_up_at", colTime},
+	},
+	sortBy: map[string]colSpec{
+		"created_at": {"created_at", colTime}, "updated_at": {"updated_at", colTime}, "subject": {"subject", colText},
+	},
+	search:  []string{"subject", "content"},
+	defSort: "updated_at",
+	tags:    true,
+	custom:  true,
+}

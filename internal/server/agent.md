@@ -171,10 +171,10 @@ Unknown field/operator/value -> 400 listing what is allowed.
 
 ## SEARCH (find anything in one call)
 
-GET /search?q=acme runs the fuzzy search across contacts, companies AND deals at
-once and returns grouped results (sections "# contacts / # companies / # deals").
-Use it when you do not yet know which type a name belongs to. Scope it with
-?types=contacts,deals (default: all three). It returns up to a handful per type;
+GET /search?q=acme runs the fuzzy search across contacts, companies, deals AND
+tickets at once and returns grouped results (sections "# contacts / # companies /
+# deals / # tickets"). Use it when you do not yet know which type a name belongs
+to. Scope it with ?types=contacts,tickets (default: all). It returns up to a handful per type;
 when a type is truncated the response says so - switch to that type's endpoint
 (e.g. GET /contacts?search=acme) for the full, paginated list.
 
@@ -184,7 +184,7 @@ GET /help this manual
 GET /healthz liveness probe (no auth)
 GET /readyz readiness probe - checks the database (no auth)
 GET /whoami identity + current workspace behind the token
-GET /search?q=&types= find anything across contacts, companies & deals (grouped; see SEARCH)
+GET /search?q=&types= find anything across contacts, companies, deals & tickets (grouped; see SEARCH)
 GET /tokens list your active tokens (sessions)
 DELETE /tokens/{id} revoke one of your tokens (log out a session)
 
@@ -210,8 +210,16 @@ GET /deals/{id} fetch one deal (includes created_by + an activity summary: activ
 PATCH /deals/{id} update (e.g. {"stage":"won","status":"won"})
 DELETE /deals/{id}?confirm= delete (two-step)
 
-GET /reminders?days=&limit= due/overdue follow-ups (contacts + deals due now; ?days=N looks ahead)
-GET /activities?contact=&deal=&company=&limit= recent activities (each shows by= who logged it)
+GET /tickets?<filters>&search=&sort=&limit=&cursor= list/query support tickets (see QUERY; search covers subject, content; filter status=open|pending|solved, assignee=, requester_id=)
+POST /tickets create {"subject":...,"content":...,"requester_id":"contact_...","assignee":"agent@x.com","status":"open"}
+GET /tickets/{id} fetch one ticket (includes a conversation summary: activities=N, last_activity)
+PATCH /tickets/{id} update (e.g. {"status":"solved"}); supports If-Match / "version" for concurrency
+DELETE /tickets/{id}?confirm= delete (two-step)
+GET /tickets/{id}/activities the ticket's conversation (notes/replies, newest first)
+POST /tickets/{id}/activities log {"kind":"note|call|email|meeting|task","body":...} onto the ticket
+
+GET /reminders?days=&limit= due/overdue follow-ups (contacts + deals + tickets due now; ?days=N looks ahead)
+GET /activities?contact=&deal=&company=&ticket=&limit= recent activities (each shows by= who logged it)
 DELETE /activities/{id} delete one activity (one-shot, no confirm; e.g. a mistake or to free quota)
 GET /audit?by=&target=&limit= audit log = record history: who did what, and what changed (an update's detail shows the field diff, e.g. "stage: lead -> customer"). by=email filters to one member; target=<handle> (e.g. contact_k7m2q) scopes it to one record's history
 

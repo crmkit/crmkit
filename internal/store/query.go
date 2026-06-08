@@ -256,6 +256,51 @@ func (s *sqlStore) QueryDeals(ws string, q Query) ([]protocol.Deal, string, erro
 	return out, next, nil
 }
 
+// QueryTickets runs a validated query over tickets.
+func (s *sqlStore) QueryTickets(ws string, q Query) ([]protocol.Ticket, string, error) {
+	sqlStr, args := s.buildListSQL("tickets", ticketColumns, ws, q)
+	rows, err := s.query(sqlStr, args...)
+	if err != nil {
+		return nil, "", err
+	}
+	out := []protocol.Ticket{}
+	for rows.Next() {
+		t, err := scanTicket(rows)
+		if err != nil {
+			rows.Close()
+			return nil, "", err
+		}
+		out = append(out, t)
+	}
+	err = rows.Err()
+	rows.Close() // close before the relation-resolution query (single-connection safety)
+	if err != nil {
+		return nil, "", err
+	}
+	next := ""
+	if len(out) > q.Limit {
+		last := out[q.Limit-1]
+		out = out[:q.Limit]
+		col, _, _ := q.effectiveSort()
+		next = q.nextCursor(ticketSortVal(last, col), last.ID)
+	}
+	if err := s.fillTicketRefs(ws, out); err != nil {
+		return nil, "", err
+	}
+	return out, next, nil
+}
+
+func ticketSortVal(t protocol.Ticket, col string) string {
+	switch col {
+	case "subject":
+		return t.Subject
+	case "created_at":
+		return strconv.FormatInt(t.CreatedAt.Unix(), 10)
+	default:
+		return strconv.FormatInt(t.UpdatedAt.Unix(), 10)
+	}
+}
+
 func contactSortVal(c protocol.Contact, col string) string {
 	switch col {
 	case "name":

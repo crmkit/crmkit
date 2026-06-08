@@ -292,7 +292,7 @@ func (s *Server) handleOAuthAuthorizePost(w http.ResponseWriter, r *http.Request
 	code := strings.TrimSpace(r.PostFormValue("code"))
 	p.Email = email
 
-	if email == "" || !strings.Contains(email, "@") {
+	if !auth.ValidEmail(email) {
 		p.Step = "email"
 		p.Error = "Enter a valid email address."
 		s.renderAuthorize(w, http.StatusOK, p)
@@ -307,7 +307,13 @@ func (s *Server) handleOAuthAuthorizePost(w http.ResponseWriter, r *http.Request
 			s.renderAuthorize(w, http.StatusTooManyRequests, p)
 			return
 		}
-		otp := auth.GenerateCode()
+		otp, err := auth.GenerateCode()
+		if err != nil {
+			p.Step = "email"
+			p.Error = "Could not start login. Try again."
+			s.renderAuthorize(w, http.StatusInternalServerError, p)
+			return
+		}
 		expires := time.Now().Add(time.Duration(s.cfg.Server.OTPTTLSeconds) * time.Second)
 		if err := s.store.PutOTP(email, auth.HashCode(s.cfg.Server.SecretKey, email, otp), expires); err != nil {
 			p.Step = "email"
@@ -388,8 +394,8 @@ func (s *Server) renderWorkspacePicker(w http.ResponseWriter, p authorizePage, u
 // redirects back to the client's redirect_uri. The workspace is now pinned: it
 // flows through the code, the access token, and every refresh.
 func (s *Server) finishAuthorize(w http.ResponseWriter, r *http.Request, p authorizePage, userID, workspaceID string) {
-	plaintext, hash := auth.GenerateOAuthCode()
-	if plaintext == "" {
+	plaintext, hash, err := auth.GenerateOAuthCode()
+	if err != nil {
 		s.renderAuthorize(w, http.StatusInternalServerError, authorizePage{Step: "error",
 			Error: "Could not issue an authorization code. Try again."})
 		return
@@ -515,8 +521,8 @@ func (s *Server) issueTokens(w http.ResponseWriter, g store.RefreshGrant) {
 		tokenName = client.Name
 	}
 
-	accessPlain, accessHash := auth.GenerateToken()
-	if accessPlain == "" {
+	accessPlain, accessHash, err := auth.GenerateToken()
+	if err != nil {
 		oauthError(w, http.StatusInternalServerError, "server_error", "Could not mint a token.")
 		return
 	}
@@ -526,8 +532,8 @@ func (s *Server) issueTokens(w http.ResponseWriter, g store.RefreshGrant) {
 		return
 	}
 
-	refreshPlain, refreshHash := auth.GenerateRefreshToken()
-	if refreshPlain == "" {
+	refreshPlain, refreshHash, err := auth.GenerateRefreshToken()
+	if err != nil {
 		oauthError(w, http.StatusInternalServerError, "server_error", "Could not mint a refresh token.")
 		return
 	}
