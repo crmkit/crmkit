@@ -9,6 +9,15 @@ by design - no UI, no SDK - just a plain-text, grepable API and a one-page
 operating manual the agent loads. The agent (ChatGPT, Claude, Cursor, …) _is_
 the interface.
 
+## Status
+
+crmkit is **0.x**: functional and in active use, with continuous improvements
+landing release to release. Until 1.0 the API, storage schema, and behavior may
+still change between versions - including breaking changes - so pin a version and
+skim the [changelog](CHANGELOG.md) before upgrading. The hosted version at
+[crmkit.ai](https://crmkit.ai) tracks the latest and stays up to date
+automatically.
+
 ## Why crmkit exists
 
 A CRM looks like something an agent could just keep in a few markdown files or a
