@@ -1,6 +1,14 @@
 # Changelog
 
-All notable changes to crmkit. Generated from conventional commits by [git-cliff](https://git-cliff.org).
+All notable changes to crmkit, following [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
+
+## [0.3.0] - 2026-06-08
+
+### Features
+
+- Ticket management: full CRUD, ticket activities with conversation summaries, and follow-ups
+- Extend cross-entity search to include tickets
+- Stricter email validation on contact and auth flows
 
 ## [0.2.0] - 2026-06-07
 
