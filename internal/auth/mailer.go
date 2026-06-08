@@ -2,6 +2,8 @@ package auth
 
 import (
 	"bytes"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -75,7 +77,9 @@ func (m *SMTPMailer) Send(e Email) error {
 		auth = smtp.PlainAuth("", m.cfg.SMTPUser, m.cfg.SMTPPass, m.cfg.SMTPHost)
 	}
 
-	const boundary = "crmkit_alt_b0undary"
+	// A random per-message boundary (not a fixed string) so it cannot be
+	// predicted and embedded in a body field to break out of a MIME part.
+	boundary := randomBoundary()
 	msg := strings.Builder{}
 	fmt.Fprintf(&msg, "From: %s\r\n", m.cfg.From)
 	fmt.Fprintf(&msg, "To: %s\r\n", e.To)
@@ -87,6 +91,19 @@ func (m *SMTPMailer) Send(e Email) error {
 	fmt.Fprintf(&msg, "--%s--\r\n", boundary)
 
 	return smtp.SendMail(addr, auth, m.cfg.From, []string{e.To}, []byte(msg.String()))
+}
+
+// randomBoundary returns a unique multipart boundary with 128 bits of entropy.
+// Unpredictability is the property that matters: a body field cannot be crafted
+// to contain a boundary the sender will choose. On the effectively unreachable
+// crypto/rand failure path it falls back to a static string - the message still
+// sends, it just loses the unpredictability guarantee.
+func randomBoundary() string {
+	buf := make([]byte, 16)
+	if _, err := rand.Read(buf); err != nil {
+		return "crmkit_alt_b0undary"
+	}
+	return "crmkit_" + hex.EncodeToString(buf)
 }
 
 // ResendMailer sends email through the Resend HTTP API (https://resend.com).

@@ -1,10 +1,39 @@
 package server
 
 import (
+	"encoding/json"
+	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
+
+// createJSONID creates an entity via POST <path> and returns its durable
+// internal id, captured from the JSON response. Tests that delete need this
+// because the confirmation token is keyed off the internal id (see confirmToken).
+func createJSONID(t *testing.T, ts *httptest.Server, token, path, body string) string {
+	t.Helper()
+	req, _ := http.NewRequest("POST", ts.URL+path, strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Accept", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("create %s: %v", path, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("create %s: status %d %q", path, resp.StatusCode, b)
+	}
+	var created struct {
+		ID string `json:"id"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil || created.ID == "" {
+		t.Fatalf("create %s: no id in response (err=%v)", path, err)
+	}
+	return created.ID
+}
 
 func TestCompanyNotesSearchable(t *testing.T) {
 	ts := newTestServer(t)
@@ -88,5 +117,60 @@ func TestCompanyActivities(t *testing.T) {
 	// ...and the detail now summarises it.
 	if _, d := do(t, ts, "GET", "/companies/"+id, token, ""); !strings.Contains(d, "activities:") || !strings.Contains(d, "last_activity:") {
 		t.Fatalf("detail should summarise activities after one is logged:\n%s", d)
+	}
+}
+
+// TestCompanyUpdateAndDeleteLifecycle covers the previously-untested company
+// mutation handlers end to end: get, conditional update (incl. a stale-version
+// 412), and the confirm-gated delete.
+func TestCompanyUpdateAndDeleteLifecycle(t *testing.T) {
+	ts := newTestServer(t)
+	token := authenticate(t, ts)
+
+	id := createJSONID(t, ts, token, "/companies", `{"name":"Acme","domain":"acme.com"}`)
+
+	// GET returns the record.
+	if s, b := do(t, ts, "GET", "/companies/"+id, token, ""); s != http.StatusOK || !strings.Contains(b, "Acme") || !strings.Contains(b, "acme.com") {
+		t.Fatalf("get company: %d %q", s, b)
+	}
+
+	// Conditional update with the current version (1) succeeds and changes the name.
+	if s, b := do(t, ts, "PATCH", "/companies/"+id, token, `{"version":1,"name":"Acme Inc"}`); s != http.StatusOK || !strings.Contains(b, "Acme Inc") {
+		t.Fatalf("conditional update: %d %q", s, b)
+	}
+
+	// The version is now 2, so a PATCH still claiming version 1 is stale -> 412.
+	if s, b := do(t, ts, "PATCH", "/companies/"+id, token, `{"version":1,"name":"Stale"}`); s != http.StatusPreconditionFailed || !strings.Contains(b, "version_conflict") {
+		t.Fatalf("stale update should 412 version_conflict, got %d %q", s, b)
+	}
+	if _, b := do(t, ts, "GET", "/companies/"+id, token, ""); strings.Contains(b, "Stale") {
+		t.Fatalf("a conflicting write must not persist:\n%s", b)
+	}
+
+	// Delete is confirm-gated, then succeeds with the token, then 404s.
+	if s, b := do(t, ts, "DELETE", "/companies/"+id, token, ""); s != http.StatusConflict || !strings.Contains(b, "confirmation_required") {
+		t.Fatalf("delete should require confirmation, got %d %q", s, b)
+	}
+	if s, b := do(t, ts, "DELETE", "/companies/"+id+"?confirm="+confirmToken(id), token, ""); s != http.StatusOK || !strings.Contains(b, "deleted") {
+		t.Fatalf("confirmed delete: %d %q", s, b)
+	}
+	if s, _ := do(t, ts, "GET", "/companies/"+id, token, ""); s != http.StatusNotFound {
+		t.Fatalf("deleted company should 404, got %d", s)
+	}
+}
+
+func TestUpsertCompanyByDomain(t *testing.T) {
+	ts := newTestServer(t)
+	tok, _ := loginAs(t, ts, "alice@acme.com")
+
+	if st, body := do(t, ts, "POST", "/companies", tok, `{"name":"Acme","domain":"acme.com"}`); st != http.StatusCreated || !strings.Contains(body, "# created") {
+		t.Fatalf("create company: %d %q", st, body)
+	}
+	st, body := do(t, ts, "POST", "/companies", tok, `{"name":"Acme Inc","domain":"ACME.com"}`)
+	if st != http.StatusOK || !strings.Contains(body, "# updated") || !strings.Contains(body, "Acme Inc") {
+		t.Fatalf("upsert company: %d %q", st, body)
+	}
+	if _, body := do(t, ts, "GET", "/companies", tok, ""); !strings.Contains(body, "# 1 company") {
+		t.Fatalf("expected 1 company, got %q", body)
 	}
 }

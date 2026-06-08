@@ -137,6 +137,14 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("PATCH /deals/{id}", s.authed(s.handleUpdateDeal))
 	mux.HandleFunc("DELETE /deals/{id}", s.authed(s.handleDeleteDeal))
 
+	mux.HandleFunc("GET /tickets", s.authed(s.handleListTickets))
+	mux.HandleFunc("POST /tickets", s.authed(s.handleCreateTicket))
+	mux.HandleFunc("GET /tickets/{id}", s.authed(s.handleGetTicket))
+	mux.HandleFunc("PATCH /tickets/{id}", s.authed(s.handleUpdateTicket))
+	mux.HandleFunc("DELETE /tickets/{id}", s.authed(s.handleDeleteTicket))
+	mux.HandleFunc("GET /tickets/{id}/activities", s.authed(s.handleListTicketActivities))
+	mux.HandleFunc("POST /tickets/{id}/activities", s.authed(s.handleCreateTicketActivity))
+
 	// Reminders, activities & audit.
 	mux.HandleFunc("GET /reminders", s.authed(s.handleListReminders))
 	mux.HandleFunc("GET /activities", s.authed(s.handleListActivities))

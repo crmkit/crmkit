@@ -546,17 +546,6 @@ func scanTokens(rows *sql.Rows) ([]TokenInfo, error) {
 	return out, rows.Err()
 }
 
-// ListTokens returns the active (non-revoked) tokens for a workspace.
-func (s *sqlStore) ListTokens(workspaceID string) ([]TokenInfo, error) {
-	rows, err := s.query(`
-SELECT id, workspace_id, name, created_at, last_used_at FROM tokens
-WHERE workspace_id = ? AND revoked_at IS NULL ORDER BY created_at DESC`, workspaceID)
-	if err != nil {
-		return nil, err
-	}
-	return scanTokens(rows)
-}
-
 // ListUserTokens returns a user's active tokens across all their workspaces, so
 // they can review and revoke their own sessions.
 func (s *sqlStore) ListUserTokens(userID string) ([]TokenInfo, error) {

@@ -47,7 +47,7 @@ func (s *Server) handleAuthRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	email := auth.NormalizeEmail(body.Email)
-	if !strings.Contains(email, "@") {
+	if !auth.ValidEmail(email) {
 		render.Error(w, r, http.StatusBadRequest, "invalid_email", `Provide a valid email: {"email":"you@example.com"}.`)
 		return
 	}
@@ -58,7 +58,11 @@ func (s *Server) handleAuthRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	code := auth.GenerateCode()
+	code, err := auth.GenerateCode()
+	if err != nil {
+		render.Error(w, r, http.StatusInternalServerError, "server_error", "Could not start login. Try again.")
+		return
+	}
 	expires := time.Now().Add(time.Duration(s.cfg.Server.OTPTTLSeconds) * time.Second)
 	if err := s.store.PutOTP(email, auth.HashCode(s.cfg.Server.SecretKey, email, code), expires); err != nil {
 		render.Error(w, r, http.StatusInternalServerError, "server_error", "Could not start login. Try again.")
@@ -139,8 +143,8 @@ func (s *Server) handleAuthVerify(w http.ResponseWriter, r *http.Request) {
 	if tokenName == "" {
 		tokenName = "default"
 	}
-	plaintext, hash := auth.GenerateToken()
-	if plaintext == "" {
+	plaintext, hash, err := auth.GenerateToken()
+	if err != nil {
 		render.Error(w, r, http.StatusInternalServerError, "server_error", "Could not mint a token.")
 		return
 	}

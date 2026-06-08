@@ -68,6 +68,16 @@ func diffCompany(before, after protocol.Company) string {
 	)
 }
 
+func diffTicket(before, after protocol.Ticket) string {
+	return changeDetail(
+		[3]string{"subject", before.Subject, after.Subject},
+		[3]string{"status", before.Status, after.Status},
+		[3]string{"assignee", before.Assignee, after.Assignee},
+		[3]string{"requester", orName(before.RequesterName, before.RequesterHandle), orName(after.RequesterName, after.RequesterHandle)},
+		[3]string{"tags", strings.Join(before.Tags, ","), strings.Join(after.Tags, ",")},
+	)
+}
+
 func diffDeal(before, after protocol.Deal) string {
 	return changeDetail(
 		[3]string{"title", before.Title, after.Title},

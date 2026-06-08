@@ -29,3 +29,28 @@ func TestEmailRendering(t *testing.T) {
 		t.Fatalf("invite HTML missing expected content:\n%s", inv.HTML)
 	}
 }
+
+func TestValidEmail(t *testing.T) {
+	valid := []string{"a@b.com", "jane.doe@acme.co", "a+tag@x.io", "user@sub.example.com"}
+	for _, e := range valid {
+		if !ValidEmail(e) {
+			t.Errorf("ValidEmail(%q) = false, want true", e)
+		}
+	}
+
+	invalid := map[string]string{
+		"empty":               "",
+		"whitespace":          "   ",
+		"no @":                "noatsign",
+		"display-name form":   "Jane <jane@acme.com>",
+		"CRLF header inject":  "a@b.com\r\nBcc: evil@x.com",
+		"bare LF":             "a@b.com\nX-Injected: 1",
+		"MIME boundary break": "a@b.com\r\n--crmkit_boundary",
+		"tab control char":    "a\t@b.com",
+	}
+	for name, e := range invalid {
+		if ValidEmail(e) {
+			t.Errorf("%s: ValidEmail(%q) = true, want false", name, e)
+		}
+	}
+}

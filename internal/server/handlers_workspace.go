@@ -139,8 +139,8 @@ func (s *Server) handleMintWorkspaceToken(w http.ResponseWriter, r *http.Request
 	if tokenName == "" {
 		tokenName = "default"
 	}
-	plaintext, hash := auth.GenerateToken()
-	if plaintext == "" {
+	plaintext, hash, err := auth.GenerateToken()
+	if err != nil {
 		s.serverErr(w, r)
 		return
 	}
@@ -207,7 +207,7 @@ func (s *Server) handleInvite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	email := auth.NormalizeEmail(body.Email)
-	if !strings.Contains(email, "@") {
+	if !auth.ValidEmail(email) {
 		render.Error(w, r, http.StatusBadRequest, "invalid_email", `Provide a valid email to invite.`)
 		return
 	}

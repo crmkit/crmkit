@@ -29,8 +29,14 @@ func TestVerifyPKCE(t *testing.T) {
 }
 
 func TestGenerateOAuthCodeUnique(t *testing.T) {
-	p1, h1 := GenerateOAuthCode()
-	p2, h2 := GenerateOAuthCode()
+	p1, h1, err := GenerateOAuthCode()
+	if err != nil {
+		t.Fatalf("GenerateOAuthCode: %v", err)
+	}
+	p2, h2, err := GenerateOAuthCode()
+	if err != nil {
+		t.Fatalf("GenerateOAuthCode: %v", err)
+	}
 	if p1 == "" || p2 == "" {
 		t.Fatal("empty code generated")
 	}
