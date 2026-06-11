@@ -193,6 +193,36 @@ func TestRateLimit(t *testing.T) {
 	}
 }
 
+func TestClientIPProxyHeaders(t *testing.T) {
+	req := httptest.NewRequest("GET", "/whoami", nil)
+	req.RemoteAddr = "10.0.0.2:1234"
+	req.Header.Set("CF-Connecting-IP", "203.0.113.8")
+	req.Header.Set("X-Forwarded-For", "198.51.100.7, 10.0.0.1")
+	req.Header.Set("X-Real-IP", "198.51.100.9")
+
+	cfg := config.Default()
+	srv := &Server{cfg: cfg}
+	if got := srv.clientIP(req); got != "10.0.0.2" {
+		t.Fatalf("clientIP without trust = %q, want remote addr host", got)
+	}
+
+	cfg.Server.TrustProxyHeaders = true
+	srv = &Server{cfg: cfg}
+	if got := srv.clientIP(req); got != "203.0.113.8" {
+		t.Fatalf("clientIP with Cloudflare header = %q, want CF-Connecting-IP", got)
+	}
+
+	req.Header.Del("CF-Connecting-IP")
+	if got := srv.clientIP(req); got != "198.51.100.7" {
+		t.Fatalf("clientIP with X-Forwarded-For = %q, want first forwarded address", got)
+	}
+
+	req.Header.Del("X-Forwarded-For")
+	if got := srv.clientIP(req); got != "198.51.100.9" {
+		t.Fatalf("clientIP with X-Real-IP = %q, want real IP", got)
+	}
+}
+
 func TestUnauthenticatedIsRejected(t *testing.T) {
 	ts := newTestServer(t)
 	status, body := do(t, ts, "GET", "/contacts", "", "")

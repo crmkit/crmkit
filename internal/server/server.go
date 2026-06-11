@@ -261,6 +261,9 @@ func (s *Server) rateLimit(next http.Handler) http.Handler {
 // deployment is configured to trust them.
 func (s *Server) clientIP(r *http.Request) string {
 	if s.cfg.Server.TrustProxyHeaders {
+		if cf := strings.TrimSpace(r.Header.Get("CF-Connecting-IP")); cf != "" {
+			return cf
+		}
 		if xff := strings.TrimSpace(r.Header.Get("X-Forwarded-For")); xff != "" {
 			if i := strings.IndexByte(xff, ','); i >= 0 {
 				return strings.TrimSpace(xff[:i])
