@@ -49,7 +49,7 @@ jobs:
       # NOTE: CHANGELOG.md is intentionally NOT regenerated here. This repo is a
       # content-copy mirror of the upstream monorepo, so its local git history is
       # a series of squashed sync commits that git-cliff cannot parse as
-      # conventional commits — regenerating here produced an empty changelog and
+      # conventional commits - regenerating here produced an empty changelog and
       # overwrote the curated CHANGELOG.md shipped from upstream. The committed
       # CHANGELOG.md is the source of truth; the release notes step in
       # release.yaml reads its latest section.
