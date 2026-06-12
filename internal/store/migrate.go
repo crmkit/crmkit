@@ -226,6 +226,12 @@ var migrations = []Migration{
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_campaign_members_unique ON campaign_members(campaign_id, entity_kind, entity_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_campaign_members_entity ON campaign_members(workspace_id, entity_kind, entity_id)`,
 	}},
+	// v16 (2026-06-12): campaigns get the free-form custom JSON column every other
+	// entity carries, so they are extensible without a schema change. A separate
+	// migration from v15 because v15 has already shipped/applied.
+	{Version: 16, Name: "campaign custom", Statements: []string{
+		`ALTER TABLE campaigns ADD COLUMN custom TEXT`,
+	}},
 }
 
 // MigrationState reports how the database's schema compares to the code.

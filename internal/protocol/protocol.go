@@ -311,8 +311,9 @@ type Campaign struct {
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"` // the free-text brief: what this campaign is for
 	// Status is the lifecycle state: active | paused | done.
-	Status    string    `json:"status,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
+	Status    string         `json:"status,omitempty"`
+	Custom    map[string]any `json:"custom,omitempty"` // free-form extension fields, like every other entity
+	CreatedAt time.Time      `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 	// CreatedBy is the member (human or agent) who created this campaign, stamped
 	// once at creation. Persisted; never changes.

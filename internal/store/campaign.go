@@ -10,7 +10,7 @@ import (
 
 // ---- campaigns -----------------------------------------------------------
 
-const campaignColumns = `id, handle, version, name, description, status, created_at, updated_at, created_by`
+const campaignColumns = `id, handle, version, name, description, status, custom, created_at, updated_at, created_by`
 
 // CreateCampaign inserts a campaign. ID/timestamps/handle are assigned if unset.
 func (s *sqlStore) CreateCampaign(ws string, c *protocol.Campaign) error {
@@ -23,12 +23,15 @@ func (s *sqlStore) CreateCampaign(ws string, c *protocol.Campaign) error {
 	}
 	c.CreatedAt, c.UpdatedAt = now, now
 	c.Version = 1
-	var err error
+	custom, err := marshalJSON(c.Custom)
+	if err != nil {
+		return err
+	}
 	c.Handle, err = s.genHandle(func(handle string) error {
 		_, e := s.exec(`
-INSERT INTO campaigns (id, workspace_id, handle, name, description, status, created_at, updated_at, created_by)
-VALUES (?,?,?,?,?,?,?,?,?)`,
-			c.ID, ws, handle, c.Name, c.Description, c.Status, unix(now), unix(now), c.CreatedBy)
+INSERT INTO campaigns (id, workspace_id, handle, name, description, status, custom, created_at, updated_at, created_by)
+VALUES (?,?,?,?,?,?,?,?,?,?)`,
+			c.ID, ws, handle, c.Name, c.Description, c.Status, custom, unix(now), unix(now), c.CreatedBy)
 		return e
 	})
 	return err
@@ -44,10 +47,14 @@ func (s *sqlStore) GetCampaign(ws, id string) (protocol.Campaign, error) {
 // increments version. See UpdateContact for the ifMatch semantics.
 func (s *sqlStore) UpdateCampaign(ws string, c *protocol.Campaign, ifMatch int64) error {
 	c.UpdatedAt = time.Now()
+	custom, err := marshalJSON(c.Custom)
+	if err != nil {
+		return err
+	}
 	res, err := s.exec(`
-UPDATE campaigns SET name=?, description=?, status=?, updated_at=?, version = version + 1
+UPDATE campaigns SET name=?, description=?, status=?, custom=?, updated_at=?, version = version + 1
 WHERE workspace_id = ? AND id = ? AND (? <= 0 OR version = ?)`,
-		c.Name, c.Description, c.Status, unix(c.UpdatedAt), ws, c.ID, ifMatch, ifMatch)
+		c.Name, c.Description, c.Status, custom, unix(c.UpdatedAt), ws, c.ID, ifMatch, ifMatch)
 	if err != nil {
 		return err
 	}
@@ -74,10 +81,10 @@ func scanCampaign(sc scanner) (protocol.Campaign, error) {
 	var (
 		c                   protocol.Campaign
 		description, status sql.NullString
-		createdBy           sql.NullString
+		custom, createdBy   sql.NullString
 		created, upd        int64
 	)
-	err := sc.Scan(&c.ID, &c.Handle, &c.Version, &c.Name, &description, &status, &created, &upd, &createdBy)
+	err := sc.Scan(&c.ID, &c.Handle, &c.Version, &c.Name, &description, &status, &custom, &created, &upd, &createdBy)
 	if errors.Is(err, sql.ErrNoRows) {
 		return protocol.Campaign{}, ErrNotFound
 	}
@@ -85,6 +92,7 @@ func scanCampaign(sc scanner) (protocol.Campaign, error) {
 		return protocol.Campaign{}, err
 	}
 	c.Description, c.Status = description.String, status.String
+	c.Custom = unmarshalCustom(custom.String)
 	c.CreatedAt, c.UpdatedAt = fromUnix(created), fromUnix(upd)
 	c.CreatedBy = createdBy.String
 	return c, nil
