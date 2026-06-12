@@ -342,6 +342,7 @@ func Campaign(c protocol.Campaign) string {
 		F("created_by", c.CreatedBy),
 		F("updated", date(c.UpdatedAt)),
 	}
+	fields = append(fields, customFields(c.Custom)...)
 	return Record(fields...)
 }
 

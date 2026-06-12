@@ -10,13 +10,14 @@ func TestCampaignCRUD(t *testing.T) {
 	ts := newTestServer(t)
 	token := authenticate(t, ts)
 
-	// Create a campaign: name required, description is the free-text brief.
+	// Create a campaign: name required, description is the free-text brief,
+	// custom carries free-form extension fields like every other entity.
 	s, b := do(t, ts, "POST", "/campaigns", token,
-		`{"name":"Series-B fintechs","description":"CTOs at fintechs that raised a Series B"}`)
+		`{"name":"Series-B fintechs","description":"CTOs at fintechs that raised a Series B","custom":{"region":"EMEA"}}`)
 	if s != http.StatusCreated {
 		t.Fatalf("create campaign: %d %q", s, b)
 	}
-	for _, want := range []string{"Series-B fintechs", "status:", "active", "CTOs at fintechs"} {
+	for _, want := range []string{"Series-B fintechs", "status:", "active", "CTOs at fintechs", "region", "EMEA"} {
 		if !strings.Contains(b, want) {
 			t.Fatalf("create response missing %q:\n%s", want, b)
 		}

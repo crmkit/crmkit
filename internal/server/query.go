@@ -344,4 +344,5 @@ var campaignQuery = queryConfig{
 	},
 	search:  []string{"name", "description"},
 	defSort: "updated_at",
+	custom:  true,
 }
