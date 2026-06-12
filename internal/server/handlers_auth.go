@@ -188,16 +188,23 @@ func (s *Server) handleWhoami(w http.ResponseWriter, r *http.Request) {
 		s.serverErr(w, r)
 		return
 	}
+	wsName, err := s.store.WorkspaceName(sess.WorkspaceID)
+	if err != nil {
+		s.serverErr(w, r)
+		return
+	}
 	resp := map[string]any{
-		"email":        sess.Email,
-		"workspace_id": sess.WorkspaceID,
-		"token_name":   sess.TokenName,
-		"plan":         plan,
-		"usage":        usage,
+		"email":          sess.Email,
+		"workspace_id":   sess.WorkspaceID,
+		"workspace_name": wsName,
+		"token_name":     sess.TokenName,
+		"plan":           plan,
+		"usage":          usage,
 	}
 	fields := []render.Field{
 		render.F("email", sess.Email),
 		render.F("workspace", sess.WorkspaceID),
+		render.F("workspace_name", wsName),
 		render.F("token", sess.TokenName),
 		render.F("plan", plan),
 	}

@@ -290,6 +290,48 @@ func (s *sqlStore) QueryTickets(ws string, q Query) ([]protocol.Ticket, string, 
 	return out, next, nil
 }
 
+// QueryCampaigns runs a validated query over campaigns.
+func (s *sqlStore) QueryCampaigns(ws string, q Query) ([]protocol.Campaign, string, error) {
+	sqlStr, args := s.buildListSQL("campaigns", campaignColumns, ws, q)
+	rows, err := s.query(sqlStr, args...)
+	if err != nil {
+		return nil, "", err
+	}
+	out := []protocol.Campaign{}
+	for rows.Next() {
+		c, err := scanCampaign(rows)
+		if err != nil {
+			rows.Close()
+			return nil, "", err
+		}
+		out = append(out, c)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil, "", err
+	}
+	next := ""
+	if len(out) > q.Limit {
+		last := out[q.Limit-1]
+		out = out[:q.Limit]
+		col, _, _ := q.effectiveSort()
+		next = q.nextCursor(campaignSortVal(last, col), last.ID)
+	}
+	return out, next, nil
+}
+
+func campaignSortVal(c protocol.Campaign, col string) string {
+	switch col {
+	case "name":
+		return c.Name
+	case "created_at":
+		return strconv.FormatInt(c.CreatedAt.Unix(), 10)
+	default:
+		return strconv.FormatInt(c.UpdatedAt.Unix(), 10)
+	}
+}
+
 func ticketSortVal(t protocol.Ticket, col string) string {
 	switch col {
 	case "subject":

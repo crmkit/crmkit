@@ -238,8 +238,9 @@ func TestFullContactFlowPlainText(t *testing.T) {
 	ts := newTestServer(t)
 	token := authenticate(t, ts)
 
-	// whoami works with the token.
-	if status, body := do(t, ts, "GET", "/whoami", token, ""); status != 200 || !strings.Contains(body, "me@example.com") {
+	// whoami works with the token and surfaces the workspace name.
+	if status, body := do(t, ts, "GET", "/whoami", token, ""); status != 200 ||
+		!strings.Contains(body, "me@example.com") || !strings.Contains(body, "workspace_name:") {
 		t.Fatalf("whoami failed: %d %q", status, body)
 	}
 

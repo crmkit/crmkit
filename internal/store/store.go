@@ -87,6 +87,7 @@ type Store interface {
 	RevokeRefreshTokenByHash(tokenHash string) error
 
 	// workspaces & membership
+	WorkspaceName(workspaceID string) (string, error)
 	ListWorkspacesForUser(userID string) ([]protocol.Workspace, error)
 	CreateWorkspace(userID, name string) (protocol.Workspace, error)
 	SetWorkspaceTimezone(workspaceID, tz string) error
@@ -127,6 +128,18 @@ type Store interface {
 	QueryTickets(ws string, q Query) ([]protocol.Ticket, string, error)
 	UpdateTicket(ws string, t *protocol.Ticket, ifMatch int64) error
 	DeleteTicket(ws, id string) error
+
+	// campaigns: a prospecting effort (brief + members). Membership is
+	// many-to-many and deduped per campaign; AttachMember is idempotent.
+	CreateCampaign(ws string, c *protocol.Campaign) error
+	GetCampaign(ws, id string) (protocol.Campaign, error)
+	QueryCampaigns(ws string, q Query) ([]protocol.Campaign, string, error)
+	UpdateCampaign(ws string, c *protocol.Campaign, ifMatch int64) error
+	DeleteCampaign(ws, id string) error
+	AttachCampaignMember(ws, campaignID, kind, entityID, reason, addedBy string) error
+	DetachCampaignMember(ws, campaignID, kind, entityID string) error
+	ListCampaignMembers(ws, campaignID, kind string, limit int) ([]protocol.CampaignMember, error)
+	CountCampaignMembers(ws, campaignID string) (map[string]int, error)
 
 	// reminders (due/overdue follow-ups across contacts and deals)
 	ListReminders(ws string, until time.Time, limit int) ([]protocol.Reminder, error)

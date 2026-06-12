@@ -145,9 +145,13 @@ CRMKIT_EMAIL_PROVIDER=cloudflare  CRMKIT_EMAIL_CLOUDFLARE_ACCOUNT_ID=…  CRMKIT
 
 ## Data model
 
-Contacts · Companies · Deals · Tickets · Activities, all workspace-scoped
-(multi-tenant), with an append-only audit log. Every entity carries a free-form
-`custom` JSON object, so the schema is extensible without server changes.
+Contacts · Companies · Deals · Tickets · Campaigns · Activities, all
+workspace-scoped (multi-tenant), with an append-only audit log. Every entity
+carries a free-form `custom` JSON object, so the schema is extensible without
+server changes. A **campaign** is a prospecting effort — a free-text brief plus
+the contacts and companies gathered under it; membership is many-to-many (an
+entity can belong to several campaigns) and deduped per campaign, so an agent
+re-finding the same contact never double-counts.
 
 ## Plans & limits
 
@@ -167,6 +171,8 @@ GET/POST /contacts/{id}/activities
 GET/POST /companies · GET/PATCH/DELETE /companies/{id}
 GET/POST /deals · GET/PATCH/DELETE /deals/{id}
 GET/POST /tickets · GET/PATCH/DELETE /tickets/{id}
+GET/POST /campaigns · GET/PATCH/DELETE /campaigns/{id}
+GET/POST /campaigns/{id}/members · DELETE /campaigns/{id}/members/{kind}/{id}
 GET /activities · GET /audit · GET /help
 ```
 

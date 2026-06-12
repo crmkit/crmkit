@@ -306,6 +306,66 @@ func Ticket(t protocol.Ticket) string {
 	return Record(fields...)
 }
 
+// ---- campaigns -----------------------------------------------------------
+
+// CampaignLine renders a campaign as one grepable line.
+func CampaignLine(c protocol.Campaign) string {
+	return Line(protocol.FormatRef(protocol.KindCampaign, c.Handle),
+		F("name", c.Name),
+		F("status", c.Status),
+		F("updated", date(c.UpdatedAt)),
+	)
+}
+
+// Campaigns renders a list of campaigns with a trailing count summary.
+func Campaigns(list []protocol.Campaign) string {
+	b := strings.Builder{}
+	for _, c := range list {
+		b.WriteString(CampaignLine(c))
+		b.WriteByte('\n')
+	}
+	fmt.Fprintf(&b, "# %d campaign(s)", len(list))
+	return b.String()
+}
+
+// Campaign renders a full campaign detail block, including member counts.
+func Campaign(c protocol.Campaign) string {
+	fields := []Field{
+		F("handle", protocol.FormatRef(protocol.KindCampaign, c.Handle)),
+		F("version", verStr(c.Version)),
+		F("name", c.Name),
+		F("status", c.Status),
+		F("description", c.Description),
+		F("contacts", countField(c.MemberCounts["contact"])),
+		F("companies", countField(c.MemberCounts["company"])),
+		F("created", date(c.CreatedAt)),
+		F("created_by", c.CreatedBy),
+		F("updated", date(c.UpdatedAt)),
+	}
+	return Record(fields...)
+}
+
+// CampaignMemberLine renders one campaign member as a grepable line.
+func CampaignMemberLine(m protocol.CampaignMember) string {
+	return Line(protocol.FormatRef(m.Kind, m.Handle),
+		F("kind", m.Kind),
+		F("name", m.Name),
+		F("reason", m.Reason),
+		F("added", date(m.AddedAt)),
+	)
+}
+
+// CampaignMembers renders a campaign's members with a trailing count summary.
+func CampaignMembers(list []protocol.CampaignMember) string {
+	b := strings.Builder{}
+	for _, m := range list {
+		b.WriteString(CampaignMemberLine(m))
+		b.WriteByte('\n')
+	}
+	fmt.Fprintf(&b, "# %d member(s)", len(list))
+	return b.String()
+}
+
 // ---- activities ----------------------------------------------------------
 
 // ActivityLine renders an activity as one grepable line.

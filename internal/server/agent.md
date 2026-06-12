@@ -218,6 +218,16 @@ DELETE /tickets/{id}?confirm= delete (two-step)
 GET /tickets/{id}/activities the ticket's conversation (notes/replies, newest first)
 POST /tickets/{id}/activities log {"kind":"note|call|email|meeting|task","body":...} onto the ticket
 
+GET /campaigns?<filters>&search=&sort=&limit=&cursor= list/query campaigns (see QUERY; search covers name, description; filter status=active|paused|done)
+POST /campaigns create {"name":...,"description":"what you're collecting & why"} (the description is the brief)
+GET /campaigns/{id} fetch one campaign (includes member counts: contacts=N, companies=N)
+PATCH /campaigns/{id} update (e.g. {"status":"done"}); supports If-Match / "version" for concurrency
+DELETE /campaigns/{id}?confirm= delete (two-step; removes the memberships, not the contacts/companies)
+GET /campaigns/{id}/members?kind=&limit= the contacts & companies in the campaign (newest first; kind=contact|company)
+POST /campaigns/{id}/members attach one {"kind":"contact","id":"contact_k7m2q","reason":"matches the brief"} - idempotent, so re-attaching the same entity is a free no-op
+DELETE /campaigns/{id}/members/{kind}/{id} detach one (e.g. .../members/contact/contact_k7m2q)
+Shortcut: POST /contacts?campaign=campaign_..&reason=.. (and /companies) attaches the created/upserted record to the campaign in one call - so the usual loop is just POST /contacts?campaign=..
+
 GET /reminders?days=&limit= due/overdue follow-ups (contacts + deals + tickets due now; ?days=N looks ahead)
 GET /activities?contact=&deal=&company=&ticket=&limit= recent activities (each shows by= who logged it)
 DELETE /activities/{id} delete one activity (one-shot, no confirm; e.g. a mistake or to free quota)
