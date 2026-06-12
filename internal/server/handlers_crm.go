@@ -180,6 +180,12 @@ func (s *Server) handleCreateContact(w http.ResponseWriter, r *http.Request) {
 		render.Error(w, r, http.StatusBadRequest, "missing_field", `"name" is required to create a contact.`)
 		return
 	}
+	// Optional ?campaign= attaches the created/upserted contact to a campaign.
+	// Resolve it up front so a bad ref fails before any write.
+	campaignID, ok := s.campaignParam(w, r)
+	if !ok {
+		return
+	}
 
 	// Upsert on email when present.
 	if email := strings.TrimSpace(c.Email); email != "" {
@@ -207,6 +213,9 @@ func (s *Server) handleCreateContact(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			s.audit(sess, "contact.upsert", protocol.Handle(protocol.KindContact, existing.ID), "updated")
+			if !s.attachToCampaign(w, r, sess, campaignID, protocol.KindContact, existing.ID) {
+				return
+			}
 			existing = existing.Localized(locationOf(sess))
 			render.Respond(w, r, http.StatusOK, existing, render.Contact(existing)+"\n# updated")
 			return
@@ -223,6 +232,9 @@ func (s *Server) handleCreateContact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.audit(sess, "contact.create", protocol.Handle(protocol.KindContact, c.ID), c.Name)
+	if !s.attachToCampaign(w, r, sess, campaignID, protocol.KindContact, c.ID) {
+		return
+	}
 	c = c.Localized(locationOf(sess))
 	render.Respond(w, r, http.StatusCreated, c, render.Contact(c)+"\n# created")
 }
@@ -440,6 +452,11 @@ func (s *Server) handleCreateCompany(w http.ResponseWriter, r *http.Request) {
 		render.Error(w, r, http.StatusBadRequest, "missing_field", `"name" is required to create a company.`)
 		return
 	}
+	// Optional ?campaign= attaches the created/upserted company to a campaign.
+	campaignID, ok := s.campaignParam(w, r)
+	if !ok {
+		return
+	}
 
 	if domain := strings.TrimSpace(c.Domain); domain != "" {
 		matches, err := s.store.FindCompanyByDomain(sess.WorkspaceID, domain)
@@ -465,6 +482,9 @@ func (s *Server) handleCreateCompany(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			s.audit(sess, "company.upsert", protocol.Handle(protocol.KindCompany, existing.ID), "updated")
+			if !s.attachToCampaign(w, r, sess, campaignID, protocol.KindCompany, existing.ID) {
+				return
+			}
 			existing = existing.Localized(locationOf(sess))
 			render.Respond(w, r, http.StatusOK, existing, render.Company(existing)+"\n# updated")
 			return
@@ -480,6 +500,9 @@ func (s *Server) handleCreateCompany(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.audit(sess, "company.create", protocol.Handle(protocol.KindCompany, c.ID), c.Name)
+	if !s.attachToCampaign(w, r, sess, campaignID, protocol.KindCompany, c.ID) {
+		return
+	}
 	c = c.Localized(locationOf(sess))
 	render.Respond(w, r, http.StatusCreated, c, render.Company(c)+"\n# created")
 }

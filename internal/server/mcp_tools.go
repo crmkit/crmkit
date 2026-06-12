@@ -38,6 +38,7 @@ var allowedPrefixes = []string{
 	"/contacts",
 	"/companies",
 	"/deals",
+	"/campaigns",
 	"/activities",
 	"/reminders",
 	"/audit",
@@ -60,6 +61,15 @@ Core:
   GET|PATCH|DELETE /contacts/{id}  fetch / update / delete one (same for companies, deals)
   POST /contacts/{id}/activities   log a call|email|meeting|note|task  {"kind":...,"body":...}
   GET  /reminders                  due/overdue follow-ups
+
+Campaigns (a prospecting effort - a brief plus the contacts/companies gathered under it):
+  GET|POST /campaigns              list / create  {"name":...,"description":"what you're collecting & why"}
+  GET|PATCH|DELETE /campaigns/{id} fetch (shows member counts) / update status / delete
+  GET  /campaigns/{id}/members     contacts & companies in the campaign
+  POST /campaigns/{id}/members     attach one {"kind":"contact","id":"contact_..","reason":".."}; idempotent, so re-finding the same contact is free
+  DELETE /campaigns/{id}/members/{kind}/{id}   detach one
+Shortcut: POST /contacts?campaign=campaign_..&reason=.. (and /companies) creates/upserts AND attaches in one call.
+Workflow: open a campaign, then upsert contacts/companies straight into it via ?campaign=. Re-check GET /campaigns/{id} for progress; the same entity can be in several campaigns.
 
 List filters: ?field=value or ?field=op:value (ops: eq ne gt gte lt lte like in is not), plus &search= &sort=-field &limit= &cursor= .
 DELETE is two-step: the first call returns a confirm token to resend as ?confirm=. Errors are instructive - they tell you what to do next.

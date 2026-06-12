@@ -12,6 +12,16 @@ import (
 // no admin.
 var ErrLastAdmin = errors.New("cannot remove the last admin")
 
+// WorkspaceName returns the display name of a workspace, or ErrNotFound.
+func (s *sqlStore) WorkspaceName(workspaceID string) (string, error) {
+	var name string
+	err := s.queryRow(`SELECT name FROM workspaces WHERE id = ?`, workspaceID).Scan(&name)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	return name, err
+}
+
 // ListWorkspacesForUser returns the workspaces a user belongs to, each with the
 // user's role, newest first.
 func (s *sqlStore) ListWorkspacesForUser(userID string) ([]protocol.Workspace, error) {

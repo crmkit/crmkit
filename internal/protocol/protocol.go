@@ -19,6 +19,7 @@ const (
 	KindDeal     = "deal"
 	KindActivity = "activity"
 	KindTicket   = "ticket"
+	KindCampaign = "campaign"
 )
 
 // idAlphabet is a lowercase, unambiguous base32 alphabet used for IDs.
@@ -298,6 +299,43 @@ type Ticket struct {
 	LastActivityAt *time.Time `json:"last_activity_at,omitempty"`
 }
 
+// Campaign is a prospecting effort: a free-text brief plus the contacts and
+// companies gathered under it. Membership is many-to-many (an entity can belong
+// to several campaigns) and deduped per campaign, so an agent re-finding the
+// same contact never double-counts. It is an anchor for agent work, not an
+// outreach channel - an email/outreach object attaches to a campaign later.
+type Campaign struct {
+	ID          string `json:"id"`
+	Handle      string `json:"handle,omitempty"`  // short public reference; see Contact.Handle
+	Version     int64  `json:"version,omitempty"` // optimistic-concurrency token; see Contact.Version
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"` // the free-text brief: what this campaign is for
+	// Status is the lifecycle state: active | paused | done.
+	Status    string    `json:"status,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+	// CreatedBy is the member (human or agent) who created this campaign, stamped
+	// once at creation. Persisted; never changes.
+	CreatedBy string `json:"created_by,omitempty"`
+	// MemberCounts summarises membership by kind (e.g. {"contact":47,"company":12}),
+	// populated on a single-record fetch for display (never persisted). The contact
+	// count is what a "fill N contacts" objective measures.
+	MemberCounts map[string]int `json:"member_counts,omitempty"`
+}
+
+// CampaignMember is one entity (a contact or company) gathered under a campaign,
+// carrying the provenance of why/when/by-whom it was attached. Name and Handle
+// are resolved on read for display (never persisted).
+type CampaignMember struct {
+	Kind    string    `json:"kind"` // contact | company
+	ID      string    `json:"id"`   // internal id of the attached entity
+	Handle  string    `json:"handle,omitempty"`
+	Name    string    `json:"name,omitempty"`
+	Reason  string    `json:"reason,omitempty"`
+	AddedBy string    `json:"added_by,omitempty"`
+	AddedAt time.Time `json:"added_at"`
+}
+
 // Reminder is a due/overdue follow-up surfaced by GET /reminders - a contact,
 // deal, or ticket whose follow_up_at has arrived. Agents pull these instead of
 // the server pushing notifications.
@@ -392,6 +430,19 @@ func (t Ticket) Localized(loc *time.Location) Ticket {
 	t.FollowUpAt = inLocPtr(t.FollowUpAt, loc)
 	t.LastActivityAt = inLocPtr(t.LastActivityAt, loc)
 	return t
+}
+
+// Localized returns a copy of the campaign with its instants expressed in loc.
+func (c Campaign) Localized(loc *time.Location) Campaign {
+	c.CreatedAt = inLoc(c.CreatedAt, loc)
+	c.UpdatedAt = inLoc(c.UpdatedAt, loc)
+	return c
+}
+
+// Localized returns a copy of the campaign member with its instant in loc.
+func (m CampaignMember) Localized(loc *time.Location) CampaignMember {
+	m.AddedAt = inLoc(m.AddedAt, loc)
+	return m
 }
 
 // Localized returns a copy of the reminder with its instant expressed in loc.

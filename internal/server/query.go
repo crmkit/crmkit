@@ -332,3 +332,16 @@ var ticketQuery = queryConfig{
 	tags:    true,
 	custom:  true,
 }
+
+var campaignQuery = queryConfig{
+	filter: map[string]colSpec{
+		"name": {"name", colText}, "status": {"status", colText},
+		"created_by": {"created_by", colText},
+		"created_at": {"created_at", colTime}, "updated_at": {"updated_at", colTime},
+	},
+	sortBy: map[string]colSpec{
+		"created_at": {"created_at", colTime}, "updated_at": {"updated_at", colTime}, "name": {"name", colText},
+	},
+	search:  []string{"name", "description"},
+	defSort: "updated_at",
+}

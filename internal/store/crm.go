@@ -20,6 +20,7 @@ var handleTable = map[string]string{
 	protocol.KindDeal:     "deals",
 	protocol.KindActivity: "activities",
 	protocol.KindTicket:   "tickets",
+	protocol.KindCampaign: "campaigns",
 }
 
 // genHandle runs insert(handle) with a freshly generated short handle, retrying

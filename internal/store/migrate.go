@@ -191,6 +191,41 @@ var migrations = []Migration{
 		`ALTER TABLE tickets ADD COLUMN follow_up_note TEXT`,
 		`CREATE INDEX IF NOT EXISTS idx_tickets_followup ON tickets(workspace_id, follow_up_at)`,
 	}},
+	// v15 (2026-06-12): campaigns. A campaign is a prospecting effort - a free-text
+	// brief plus the contacts and companies gathered under it. Membership is
+	// many-to-many (an entity can belong to several campaigns) and deduped per
+	// campaign by a unique index, so an agent re-finding the same contact is a
+	// no-op and never double-counts toward a campaign's objective. The membership
+	// rows are workspace-scoped for safety; dangling rows (entity since deleted)
+	// are filtered on read rather than cascaded.
+	{Version: 15, Name: "campaigns", Statements: []string{
+		`CREATE TABLE IF NOT EXISTS campaigns (
+	id           TEXT PRIMARY KEY,
+	workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+	handle       TEXT NOT NULL DEFAULT '',
+	version      BIGINT NOT NULL DEFAULT 1,
+	name         TEXT NOT NULL,
+	description  TEXT,
+	status       TEXT NOT NULL DEFAULT 'active',
+	created_at   BIGINT NOT NULL,
+	updated_at   BIGINT NOT NULL,
+	created_by   TEXT
+)`,
+		`CREATE INDEX IF NOT EXISTS idx_campaigns_ws ON campaigns(workspace_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_campaigns_status ON campaigns(workspace_id, status)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_campaigns_ws_handle ON campaigns(workspace_id, handle)`,
+		`CREATE TABLE IF NOT EXISTS campaign_members (
+	campaign_id  TEXT NOT NULL REFERENCES campaigns(id),
+	workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+	entity_kind  TEXT NOT NULL,
+	entity_id    TEXT NOT NULL,
+	reason       TEXT,
+	added_by     TEXT,
+	added_at     BIGINT NOT NULL
+)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_campaign_members_unique ON campaign_members(campaign_id, entity_kind, entity_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_campaign_members_entity ON campaign_members(workspace_id, entity_kind, entity_id)`,
+	}},
 }
 
 // MigrationState reports how the database's schema compares to the code.

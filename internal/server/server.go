@@ -145,6 +145,17 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /tickets/{id}/activities", s.authed(s.handleListTicketActivities))
 	mux.HandleFunc("POST /tickets/{id}/activities", s.authed(s.handleCreateTicketActivity))
 
+	// Campaigns: a prospecting effort (brief + members). Members are contacts and
+	// companies attached many-to-many, deduped per campaign.
+	mux.HandleFunc("GET /campaigns", s.authed(s.handleListCampaigns))
+	mux.HandleFunc("POST /campaigns", s.authed(s.handleCreateCampaign))
+	mux.HandleFunc("GET /campaigns/{id}", s.authed(s.handleGetCampaign))
+	mux.HandleFunc("PATCH /campaigns/{id}", s.authed(s.handleUpdateCampaign))
+	mux.HandleFunc("DELETE /campaigns/{id}", s.authed(s.handleDeleteCampaign))
+	mux.HandleFunc("GET /campaigns/{id}/members", s.authed(s.handleListCampaignMembers))
+	mux.HandleFunc("POST /campaigns/{id}/members", s.authed(s.handleAttachCampaignMember))
+	mux.HandleFunc("DELETE /campaigns/{id}/members/{kind}/{memberId}", s.authed(s.handleDetachCampaignMember))
+
 	// Reminders, activities & audit.
 	mux.HandleFunc("GET /reminders", s.authed(s.handleListReminders))
 	mux.HandleFunc("GET /activities", s.authed(s.handleListActivities))
