@@ -10,13 +10,17 @@ import (
 	"github.com/crmkit/crmkit/internal/config"
 )
 
+// limitPtr builds a PlanLimits cap value; the fields are *int so a set cap (incl.
+// 0 = none) is distinct from an omitted one.
+func limitPtr(v int) *int { return &v }
+
 // TestPlanQuota verifies per-plan create limits are enforced and surfaced.
 func TestPlanQuota(t *testing.T) {
 	st := newMigratedStore(t)
 	cfg := config.Default()
 	cfg.Server.Local = true // loginAs reads the echoed local code
 	cfg.Plans.Catalogue["basic"] = config.PlanLimits{
-		MaxWorkspaces: 1, MaxMembers: 1, MaxContacts: 2, MaxCompanies: -1, MaxDeals: -1,
+		MaxWorkspaces: limitPtr(1), MaxMembers: limitPtr(1), MaxContacts: limitPtr(2), MaxCompanies: limitPtr(-1), MaxDeals: limitPtr(-1),
 	}
 	ts := httptest.NewServer(New(cfg, st, memoryRL(t)).Handler())
 	t.Cleanup(ts.Close)
@@ -54,7 +58,7 @@ func TestActivityQuota(t *testing.T) {
 	cfg := config.Default()
 	cfg.Server.Local = true
 	cfg.Plans.Catalogue["basic"] = config.PlanLimits{
-		MaxWorkspaces: 1, MaxMembers: 1, MaxContacts: -1, MaxCompanies: -1, MaxDeals: -1, MaxActivities: 1,
+		MaxWorkspaces: limitPtr(1), MaxMembers: limitPtr(1), MaxContacts: limitPtr(-1), MaxCompanies: limitPtr(-1), MaxDeals: limitPtr(-1), MaxActivities: limitPtr(1),
 	}
 	ts := httptest.NewServer(New(cfg, st, memoryRL(t)).Handler())
 	t.Cleanup(ts.Close)

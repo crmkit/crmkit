@@ -119,23 +119,28 @@ type PlansConfig struct {
 	Catalogue map[string]PlanLimits `yaml:"catalogue"`
 }
 
-// PlanLimits caps how many objects may be created. A value of -1 means
-// unlimited. The workspace-scoped limits (members, contacts, companies, deals)
-// are governed by the workspace's plan; MaxWorkspaces (per user) is governed by
-// the user's plan. MaxMembers counts a "seat" as a member plus any pending
-// invite, so over-inviting beyond the cap is rejected.
+// PlanLimits caps how many objects may be created. Each cap is a pointer so an
+// omitted key is distinct from an explicit value: nil (key absent from the
+// config) means "unset" and takes the plan default; a set 0 means "none allowed"
+// (the plan does not permit that resource); a negative value (-1) means
+// unlimited. applyDefaults resolves every unset (nil) cap to the default, so a
+// config-loaded plan never carries a nil. The workspace-scoped limits (members,
+// contacts, companies, deals) are governed by the workspace's plan;
+// MaxWorkspaces (per user) is governed by the user's plan. MaxMembers counts a
+// "seat" as a member plus any pending invite, so over-inviting beyond the cap is
+// rejected.
 type PlanLimits struct {
-	MaxWorkspaces int `yaml:"max_workspaces"` // per user
-	MaxMembers    int `yaml:"max_members"`    // per workspace (members + pending invites)
-	MaxContacts   int `yaml:"max_contacts"`
-	MaxCompanies  int `yaml:"max_companies"`
-	MaxDeals      int `yaml:"max_deals"`
-	MaxTickets    int `yaml:"max_tickets"`
-	MaxTasks      int `yaml:"max_tasks"`
+	MaxWorkspaces *int `yaml:"max_workspaces"` // per user
+	MaxMembers    *int `yaml:"max_members"`    // per workspace (members + pending invites)
+	MaxContacts   *int `yaml:"max_contacts"`
+	MaxCompanies  *int `yaml:"max_companies"`
+	MaxDeals      *int `yaml:"max_deals"`
+	MaxTickets    *int `yaml:"max_tickets"`
+	MaxTasks      *int `yaml:"max_tasks"`
 	// MaxActivities is a per-workspace backstop on the activity log. Activities
 	// are a timeline, not a collection, so this is set generously (an abuse/
 	// storage backstop, not a usability quota).
-	MaxActivities int `yaml:"max_activities"`
+	MaxActivities *int `yaml:"max_activities"`
 	// AuditRetentionDays bounds the audit log by age, per plan: a workspace's
 	// audit entries older than this are pruned (the audit is a security log, not
 	// record history, so it is time-bounded). This is a duration, not a count, so
@@ -144,19 +149,24 @@ type PlanLimits struct {
 	AuditRetentionDays int `yaml:"audit_retention_days"`
 }
 
+// intPtr returns a pointer to v. Used to build PlanLimits cap values, where a
+// pointer distinguishes a set cap from an unset (nil) one.
+func intPtr(v int) *int { return &v }
+
 // defaultBasicLimits is the built-in "basic" plan, applied when the config does
-// not define the default plan. Deliberately generous enough for real use while
-// bounding runaway/abusive growth.
+// not define the default plan, and the source of the per-cap fallback used to
+// resolve any unset (nil) cap on a configured plan. Deliberately generous enough
+// for real use while bounding runaway/abusive growth.
 func defaultBasicLimits() PlanLimits {
 	return PlanLimits{
-		MaxWorkspaces:      1,
-		MaxMembers:         1,
-		MaxContacts:        1000,
-		MaxCompanies:       1000,
-		MaxDeals:           1000,
-		MaxTickets:         1000,
-		MaxTasks:           1000,
-		MaxActivities:      10000, // ~10x the data rows; activities accumulate faster
+		MaxWorkspaces:      intPtr(1),
+		MaxMembers:         intPtr(1),
+		MaxContacts:        intPtr(1000),
+		MaxCompanies:       intPtr(1000),
+		MaxDeals:           intPtr(1000),
+		MaxTickets:         intPtr(1000),
+		MaxTasks:           intPtr(1000),
+		MaxActivities:      intPtr(10000), // ~10x the data rows; activities accumulate faster
 		AuditRetentionDays: defaultAuditRetentionDays,
 	}
 }
@@ -171,28 +181,37 @@ func (p PlansConfig) LimitsFor(plan string) PlanLimits {
 }
 
 // For returns the limit for a named resource ("workspaces", "members",
-// "contacts", "companies", "deals", "activities"); -1 (unlimited) for anything
-// unknown.
+// "contacts", "companies", "deals", "tickets", "tasks", "activities"); -1
+// (unlimited) for anything unknown. A nil (unset) cap also reports -1: a
+// config-loaded plan is always resolved by applyDefaults so its caps are never
+// nil, but a hand-built PlanLimits literal that omits a field reads as unlimited
+// for that resource rather than panicking.
 func (l PlanLimits) For(resource string) int {
+	var p *int
 	switch resource {
 	case "workspaces":
-		return l.MaxWorkspaces
+		p = l.MaxWorkspaces
 	case "members":
-		return l.MaxMembers
+		p = l.MaxMembers
 	case "contacts":
-		return l.MaxContacts
+		p = l.MaxContacts
 	case "companies":
-		return l.MaxCompanies
+		p = l.MaxCompanies
 	case "deals":
-		return l.MaxDeals
+		p = l.MaxDeals
 	case "tickets":
-		return l.MaxTickets
+		p = l.MaxTickets
 	case "tasks":
-		return l.MaxTasks
+		p = l.MaxTasks
 	case "activities":
-		return l.MaxActivities
+		p = l.MaxActivities
+	default:
+		return -1
 	}
-	return -1
+	if p == nil {
+		return -1
+	}
+	return *p
 }
 
 // RateLimitConfig configures request throttling. The backend is pluggable:
@@ -516,13 +535,43 @@ func applyDefaults(cfg *Config) {
 	if _, ok := cfg.Plans.Catalogue[cfg.Plans.Default]; !ok {
 		cfg.Plans.Catalogue[cfg.Plans.Default] = defaultBasicLimits()
 	}
-	// Every plan gets an audit-retention window: 0 (unset) takes the default;
-	// a negative value is the opt-out (keep audit forever for that plan).
+	// Resolve every omitted (nil) cap to the built-in default, so a
+	// partially-specified plan inherits sensible limits instead of leaving a
+	// resource unbounded-or-undefined. Only a truly absent key is nil here: an
+	// explicit 0 (none allowed) or a negative (-1 = unlimited) decodes to a
+	// non-nil pointer and is kept as written.
+	def := defaultBasicLimits()
 	for name, l := range cfg.Plans.Catalogue {
+		if l.MaxWorkspaces == nil {
+			l.MaxWorkspaces = def.MaxWorkspaces
+		}
+		if l.MaxMembers == nil {
+			l.MaxMembers = def.MaxMembers
+		}
+		if l.MaxContacts == nil {
+			l.MaxContacts = def.MaxContacts
+		}
+		if l.MaxCompanies == nil {
+			l.MaxCompanies = def.MaxCompanies
+		}
+		if l.MaxDeals == nil {
+			l.MaxDeals = def.MaxDeals
+		}
+		if l.MaxTickets == nil {
+			l.MaxTickets = def.MaxTickets
+		}
+		if l.MaxTasks == nil {
+			l.MaxTasks = def.MaxTasks
+		}
+		if l.MaxActivities == nil {
+			l.MaxActivities = def.MaxActivities
+		}
+		// Audit retention: 0 (unset) takes the default; a negative value is the
+		// opt-out (keep audit forever for that plan), so it is left untouched.
 		if l.AuditRetentionDays == 0 {
 			l.AuditRetentionDays = defaultAuditRetentionDays
-			cfg.Plans.Catalogue[name] = l
 		}
+		cfg.Plans.Catalogue[name] = l
 	}
 	// Rate-limit defaults apply only when unset (0). Set rps negative to disable
 	// the general limiter; it is normalized to 0 (disabled) below.

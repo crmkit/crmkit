@@ -148,11 +148,11 @@ CRMKIT_EMAIL_PROVIDER=cloudflare  CRMKIT_EMAIL_CLOUDFLARE_ACCOUNT_ID=…  CRMKIT
 Contacts · Companies · Deals · Tickets · Tasks · Campaigns · Activities, all
 workspace-scoped (multi-tenant), with an append-only audit log. Every entity
 carries a free-form `custom` JSON object, so the schema is extensible without
-server changes. A **campaign** is a prospecting effort — a free-text brief plus
+server changes. A **campaign** is a prospecting effort - a free-text brief plus
 the contacts and companies gathered under it; membership is many-to-many (an
 entity can belong to several campaigns) and deduped per campaign, so an agent
 re-finding the same contact never double-counts. A **task** is a completable
-unit of follow-up work — a title, an optional due date, a done flag, and
+unit of follow-up work - a title, an optional due date, a done flag, and
 explicit links to any of the records it concerns; due, open tasks surface via
 `GET /reminders`.
 

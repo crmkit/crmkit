@@ -23,7 +23,7 @@ func injectionServer(t *testing.T, st store.Store) *httptest.Server {
 	cfg.RateLimit.RPS = 100000
 	cfg.RateLimit.Burst = 100000
 	if pl, ok := cfg.Plans.Catalogue[cfg.Plans.Default]; ok {
-		pl.MaxWorkspaces, pl.MaxMembers, pl.MaxContacts, pl.MaxCompanies, pl.MaxDeals = -1, -1, -1, -1, -1
+		pl.MaxWorkspaces, pl.MaxMembers, pl.MaxContacts, pl.MaxCompanies, pl.MaxDeals = limitPtr(-1), limitPtr(-1), limitPtr(-1), limitPtr(-1), limitPtr(-1)
 		cfg.Plans.Catalogue[cfg.Plans.Default] = pl
 	}
 	ts := httptest.NewServer(New(cfg, st, memoryRL(t)).Handler())
