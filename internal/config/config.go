@@ -131,6 +131,7 @@ type PlanLimits struct {
 	MaxCompanies  int `yaml:"max_companies"`
 	MaxDeals      int `yaml:"max_deals"`
 	MaxTickets    int `yaml:"max_tickets"`
+	MaxTasks      int `yaml:"max_tasks"`
 	// MaxActivities is a per-workspace backstop on the activity log. Activities
 	// are a timeline, not a collection, so this is set generously (an abuse/
 	// storage backstop, not a usability quota).
@@ -154,6 +155,7 @@ func defaultBasicLimits() PlanLimits {
 		MaxCompanies:       1000,
 		MaxDeals:           1000,
 		MaxTickets:         1000,
+		MaxTasks:           1000,
 		MaxActivities:      10000, // ~10x the data rows; activities accumulate faster
 		AuditRetentionDays: defaultAuditRetentionDays,
 	}
@@ -185,6 +187,8 @@ func (l PlanLimits) For(resource string) int {
 		return l.MaxDeals
 	case "tickets":
 		return l.MaxTickets
+	case "tasks":
+		return l.MaxTasks
 	case "activities":
 		return l.MaxActivities
 	}

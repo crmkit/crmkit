@@ -280,23 +280,34 @@ func TestReminders(t *testing.T) {
 
 	past := time.Now().Add(-time.Hour)
 	soon := time.Now().Add(48 * time.Hour)
-	overdue := &protocol.Contact{Name: "Overdue Co", FollowUpAt: &past, FollowUpNote: "ping"}
-	if err := st.CreateContact(ws, overdue); err != nil {
+
+	contact := &protocol.Contact{Name: "Acme Lead"}
+	if err := st.CreateContact(ws, contact); err != nil {
 		t.Fatalf("create contact: %v", err)
 	}
-	_ = st.CreateDeal(ws, &protocol.Deal{Title: "Future deal", FollowUpAt: &soon})
-	_ = st.CreateContact(ws, &protocol.Contact{Name: "No followup"}) // no follow_up_at
 
-	// Due now: only the overdue contact.
+	overdue := &protocol.Task{Title: "ping", DueAt: &past, ContactID: contact.ID}
+	if err := st.CreateTask(ws, overdue); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	_ = st.CreateTask(ws, &protocol.Task{Title: "Future task", DueAt: &soon})
+	_ = st.CreateTask(ws, &protocol.Task{Title: "Someday (no due)"}) // no due_at: never a reminder
+	done := time.Now()
+	_ = st.CreateTask(ws, &protocol.Task{Title: "Already done", DueAt: &past, DoneAt: &done}) // done: excluded
+
+	// Due now: only the overdue, open task - and it carries the linked contact ref.
 	now, err := st.ListReminders(ws, time.Now(), 50)
 	if err != nil {
 		t.Fatalf("list reminders: %v", err)
 	}
-	if len(now) != 1 || now[0].Kind != protocol.KindContact || !now[0].Overdue || now[0].Note != "ping" {
-		t.Fatalf("expected 1 overdue contact, got %+v", now)
+	if len(now) != 1 || now[0].Kind != protocol.KindTask || !now[0].Overdue || now[0].Title != "ping" {
+		t.Fatalf("expected 1 overdue task, got %+v", now)
+	}
+	if want := protocol.FormatRef(protocol.KindContact, contact.Handle); now[0].About != want {
+		t.Fatalf("reminder About = %q, want %q", now[0].About, want)
 	}
 
-	// Look ahead a week: both, soonest first.
+	// Look ahead a week: both open due tasks, soonest first.
 	ahead, _ := st.ListReminders(ws, time.Now().Add(7*24*time.Hour), 50)
 	if len(ahead) != 2 {
 		t.Fatalf("expected 2 reminders within a week, got %d", len(ahead))
@@ -305,16 +316,16 @@ func TestReminders(t *testing.T) {
 		t.Fatal("reminders should be sorted soonest first")
 	}
 
-	// follow_up persists and clears.
-	got, _ := st.GetContact(ws, overdue.ID)
-	if got.FollowUpAt == nil {
-		t.Fatal("follow_up_at should persist")
+	// Completing a task drops it from reminders.
+	got, _ := st.GetTask(ws, overdue.ID)
+	if got.DoneAt != nil {
+		t.Fatal("task should start open")
 	}
-	got.FollowUpAt = nil
-	got.FollowUpNote = ""
-	_ = st.UpdateContact(ws, &got, 0)
-	if rec, _ := st.GetContact(ws, overdue.ID); rec.FollowUpAt != nil {
-		t.Fatal("follow_up_at should clear to nil")
+	got.DoneAt = &done
+	_ = st.UpdateTask(ws, &got, 0)
+	after, _ := st.ListReminders(ws, time.Now(), 50)
+	if len(after) != 0 {
+		t.Fatalf("completed task should not be a reminder, got %+v", after)
 	}
 }
 

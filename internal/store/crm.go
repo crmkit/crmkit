@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"sort"
 	"strings"
 	"time"
 
@@ -21,6 +20,7 @@ var handleTable = map[string]string{
 	protocol.KindActivity: "activities",
 	protocol.KindTicket:   "tickets",
 	protocol.KindCampaign: "campaigns",
+	protocol.KindTask:     "tasks",
 }
 
 // genHandle runs insert(handle) with a freshly generated short handle, retrying
@@ -81,10 +81,10 @@ func (s *sqlStore) CreateContact(ws string, c *protocol.Contact) error {
 	}
 	c.Handle, err = s.genHandle(func(handle string) error {
 		_, e := s.exec(`
-INSERT INTO contacts (id, workspace_id, handle, name, email, phone, company_id, owner, stage, tags, notes, custom, follow_up_at, follow_up_note, created_at, updated_at, created_by)
-VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+INSERT INTO contacts (id, workspace_id, handle, name, email, phone, company_id, owner, stage, tags, notes, custom, created_at, updated_at, created_by)
+VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 			c.ID, ws, handle, c.Name, c.Email, c.Phone, c.CompanyID, c.Owner, c.Stage, tags, c.Notes, custom,
-			nullableUnix(c.FollowUpAt), c.FollowUpNote, unix(now), unix(now), c.CreatedBy)
+			unix(now), unix(now), c.CreatedBy)
 		return e
 	})
 	if err != nil {
@@ -93,7 +93,7 @@ VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 	return s.fillContactRef(ws, c)
 }
 
-const contactColumns = `id, handle, version, name, email, phone, company_id, owner, stage, tags, notes, custom, follow_up_at, follow_up_note, created_at, updated_at, created_by`
+const contactColumns = `id, handle, version, name, email, phone, company_id, owner, stage, tags, notes, custom, created_at, updated_at, created_by`
 
 // GetContact loads one contact scoped to the workspace.
 func (s *sqlStore) GetContact(ws, id string) (protocol.Contact, error) {
@@ -144,10 +144,10 @@ func (s *sqlStore) UpdateContact(ws string, c *protocol.Contact, ifMatch int64) 
 		return err
 	}
 	res, err := s.exec(`
-UPDATE contacts SET name=?, email=?, phone=?, company_id=?, owner=?, stage=?, tags=?, notes=?, custom=?, follow_up_at=?, follow_up_note=?, updated_at=?, version = version + 1
+UPDATE contacts SET name=?, email=?, phone=?, company_id=?, owner=?, stage=?, tags=?, notes=?, custom=?, updated_at=?, version = version + 1
 WHERE workspace_id = ? AND id = ? AND (? <= 0 OR version = ?)`,
 		c.Name, c.Email, c.Phone, c.CompanyID, c.Owner, c.Stage, tags, c.Notes, custom,
-		nullableUnix(c.FollowUpAt), c.FollowUpNote, unix(c.UpdatedAt), ws, c.ID, ifMatch, ifMatch)
+		unix(c.UpdatedAt), ws, c.ID, ifMatch, ifMatch)
 	if err != nil {
 		return err
 	}
@@ -176,12 +176,10 @@ func scanContact(sc scanner) (protocol.Contact, error) {
 		companyID, owner   sql.NullString
 		stage, tags        sql.NullString
 		notes, custom      sql.NullString
-		followNote         sql.NullString
 		createdBy          sql.NullString
-		followAt           sql.NullInt64
 		createdAt, updated int64
 	)
-	err := sc.Scan(&c.ID, &c.Handle, &c.Version, &c.Name, &email, &phone, &companyID, &owner, &stage, &tags, &notes, &custom, &followAt, &followNote, &createdAt, &updated, &createdBy)
+	err := sc.Scan(&c.ID, &c.Handle, &c.Version, &c.Name, &email, &phone, &companyID, &owner, &stage, &tags, &notes, &custom, &createdAt, &updated, &createdBy)
 	if errors.Is(err, sql.ErrNoRows) {
 		return protocol.Contact{}, ErrNotFound
 	}
@@ -193,8 +191,6 @@ func scanContact(sc scanner) (protocol.Contact, error) {
 	c.Notes = notes.String
 	c.Tags = unmarshalTags(tags.String)
 	c.Custom = unmarshalCustom(custom.String)
-	c.FollowUpAt = fromNullableUnix(followAt)
-	c.FollowUpNote = followNote.String
 	c.CreatedAt, c.UpdatedAt = fromUnix(createdAt), fromUnix(updated)
 	c.CreatedBy = createdBy.String
 	return c, nil
@@ -331,10 +327,10 @@ func (s *sqlStore) CreateDeal(ws string, d *protocol.Deal) error {
 	}
 	d.Handle, err = s.genHandle(func(handle string) error {
 		_, e := s.exec(`
-INSERT INTO deals (id, workspace_id, handle, title, contact_id, company_id, amount_cents, currency, stage, status, custom, follow_up_at, follow_up_note, created_at, updated_at, created_by)
-VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+INSERT INTO deals (id, workspace_id, handle, title, contact_id, company_id, amount_cents, currency, stage, status, custom, created_at, updated_at, created_by)
+VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 			d.ID, ws, handle, d.Title, d.ContactID, d.CompanyID, d.AmountCents, d.Currency, d.Stage, d.Status, custom,
-			nullableUnix(d.FollowUpAt), d.FollowUpNote, unix(now), unix(now), d.CreatedBy)
+			unix(now), unix(now), d.CreatedBy)
 		return e
 	})
 	if err != nil {
@@ -343,7 +339,7 @@ VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 	return s.fillDealRef(ws, d)
 }
 
-const dealColumns = `id, handle, version, title, contact_id, company_id, amount_cents, currency, stage, status, custom, follow_up_at, follow_up_note, created_at, updated_at, created_by`
+const dealColumns = `id, handle, version, title, contact_id, company_id, amount_cents, currency, stage, status, custom, created_at, updated_at, created_by`
 
 // GetDeal loads one deal scoped to the workspace.
 func (s *sqlStore) GetDeal(ws, id string) (protocol.Deal, error) {
@@ -368,10 +364,10 @@ func (s *sqlStore) UpdateDeal(ws string, d *protocol.Deal, ifMatch int64) error 
 		return err
 	}
 	res, err := s.exec(`
-UPDATE deals SET title=?, contact_id=?, company_id=?, amount_cents=?, currency=?, stage=?, status=?, custom=?, follow_up_at=?, follow_up_note=?, updated_at=?, version = version + 1
+UPDATE deals SET title=?, contact_id=?, company_id=?, amount_cents=?, currency=?, stage=?, status=?, custom=?, updated_at=?, version = version + 1
 WHERE workspace_id = ? AND id = ? AND (? <= 0 OR version = ?)`,
 		d.Title, d.ContactID, d.CompanyID, d.AmountCents, d.Currency, d.Stage, d.Status, custom,
-		nullableUnix(d.FollowUpAt), d.FollowUpNote, unix(d.UpdatedAt), ws, d.ID, ifMatch, ifMatch)
+		unix(d.UpdatedAt), ws, d.ID, ifMatch, ifMatch)
 	if err != nil {
 		return err
 	}
@@ -399,13 +395,11 @@ func scanDeal(sc scanner) (protocol.Deal, error) {
 		contactID, companyID    sql.NullString
 		currency, stage, status sql.NullString
 		custom                  sql.NullString
-		followNote              sql.NullString
 		createdBy               sql.NullString
 		amount                  sql.NullInt64
-		followAt                sql.NullInt64
 		created, upd            int64
 	)
-	err := sc.Scan(&d.ID, &d.Handle, &d.Version, &d.Title, &contactID, &companyID, &amount, &currency, &stage, &status, &custom, &followAt, &followNote, &created, &upd, &createdBy)
+	err := sc.Scan(&d.ID, &d.Handle, &d.Version, &d.Title, &contactID, &companyID, &amount, &currency, &stage, &status, &custom, &created, &upd, &createdBy)
 	if errors.Is(err, sql.ErrNoRows) {
 		return protocol.Deal{}, ErrNotFound
 	}
@@ -416,8 +410,6 @@ func scanDeal(sc scanner) (protocol.Deal, error) {
 	d.AmountCents = amount.Int64
 	d.Currency, d.Stage, d.Status = currency.String, stage.String, status.String
 	d.Custom = unmarshalCustom(custom.String)
-	d.FollowUpAt = fromNullableUnix(followAt)
-	d.FollowUpNote = followNote.String
 	d.CreatedAt, d.UpdatedAt = fromUnix(created), fromUnix(upd)
 	d.CreatedBy = createdBy.String
 	return d, nil
@@ -446,10 +438,10 @@ func (s *sqlStore) CreateTicket(ws string, t *protocol.Ticket) error {
 	}
 	t.Handle, err = s.genHandle(func(handle string) error {
 		_, e := s.exec(`
-INSERT INTO tickets (id, workspace_id, handle, subject, content, status, requester_id, assignee, tags, custom, follow_up_at, follow_up_note, created_at, updated_at, created_by)
-VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+INSERT INTO tickets (id, workspace_id, handle, subject, content, status, requester_id, assignee, tags, custom, created_at, updated_at, created_by)
+VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 			t.ID, ws, handle, t.Subject, t.Content, t.Status, t.RequesterID, t.Assignee, tags, custom,
-			nullableUnix(t.FollowUpAt), t.FollowUpNote, unix(now), unix(now), t.CreatedBy)
+			unix(now), unix(now), t.CreatedBy)
 		return e
 	})
 	if err != nil {
@@ -458,7 +450,7 @@ VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 	return s.fillTicketRef(ws, t)
 }
 
-const ticketColumns = `id, handle, version, subject, content, status, requester_id, assignee, tags, custom, follow_up_at, follow_up_note, created_at, updated_at, created_by`
+const ticketColumns = `id, handle, version, subject, content, status, requester_id, assignee, tags, custom, created_at, updated_at, created_by`
 
 // GetTicket loads one ticket scoped to the workspace.
 func (s *sqlStore) GetTicket(ws, id string) (protocol.Ticket, error) {
@@ -486,10 +478,10 @@ func (s *sqlStore) UpdateTicket(ws string, t *protocol.Ticket, ifMatch int64) er
 		return err
 	}
 	res, err := s.exec(`
-UPDATE tickets SET subject=?, content=?, status=?, requester_id=?, assignee=?, tags=?, custom=?, follow_up_at=?, follow_up_note=?, updated_at=?, version = version + 1
+UPDATE tickets SET subject=?, content=?, status=?, requester_id=?, assignee=?, tags=?, custom=?, updated_at=?, version = version + 1
 WHERE workspace_id = ? AND id = ? AND (? <= 0 OR version = ?)`,
 		t.Subject, t.Content, t.Status, t.RequesterID, t.Assignee, tags, custom,
-		nullableUnix(t.FollowUpAt), t.FollowUpNote, unix(t.UpdatedAt), ws, t.ID, ifMatch, ifMatch)
+		unix(t.UpdatedAt), ws, t.ID, ifMatch, ifMatch)
 	if err != nil {
 		return err
 	}
@@ -517,11 +509,10 @@ func scanTicket(sc scanner) (protocol.Ticket, error) {
 		content, status       sql.NullString
 		requesterID, assignee sql.NullString
 		tags, custom          sql.NullString
-		followNote, createdBy sql.NullString
-		followAt              sql.NullInt64
+		createdBy             sql.NullString
 		created, upd          int64
 	)
-	err := sc.Scan(&t.ID, &t.Handle, &t.Version, &t.Subject, &content, &status, &requesterID, &assignee, &tags, &custom, &followAt, &followNote, &created, &upd, &createdBy)
+	err := sc.Scan(&t.ID, &t.Handle, &t.Version, &t.Subject, &content, &status, &requesterID, &assignee, &tags, &custom, &created, &upd, &createdBy)
 	if errors.Is(err, sql.ErrNoRows) {
 		return protocol.Ticket{}, ErrNotFound
 	}
@@ -532,8 +523,6 @@ func scanTicket(sc scanner) (protocol.Ticket, error) {
 	t.RequesterID, t.Assignee = requesterID.String, assignee.String
 	t.Tags = unmarshalTags(tags.String)
 	t.Custom = unmarshalCustom(custom.String)
-	t.FollowUpAt = fromNullableUnix(followAt)
-	t.FollowUpNote = followNote.String
 	t.CreatedAt, t.UpdatedAt = fromUnix(created), fromUnix(upd)
 	t.CreatedBy = createdBy.String
 	return t, nil
@@ -569,10 +558,164 @@ func (s *sqlStore) fillTicketRef(ws string, t *protocol.Ticket) error {
 	return nil
 }
 
+// ---- tasks ---------------------------------------------------------------
+
+// CreateTask inserts a task. Done is a write-only convenience consumed by the
+// HTTP layer; the store persists DoneAt only.
+func (s *sqlStore) CreateTask(ws string, t *protocol.Task) error {
+	now := time.Now()
+	if t.ID == "" {
+		t.ID = protocol.NewID("task")
+	}
+	t.CreatedAt, t.UpdatedAt = now, now
+	t.Version = 1
+	custom, err := marshalJSON(t.Custom)
+	if err != nil {
+		return err
+	}
+	t.Handle, err = s.genHandle(func(handle string) error {
+		_, e := s.exec(`
+INSERT INTO tasks (id, workspace_id, handle, title, due_at, done_at, assignee, contact_id, company_id, deal_id, ticket_id, custom, created_at, updated_at, created_by)
+VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			t.ID, ws, handle, t.Title, nullableUnix(t.DueAt), nullableUnix(t.DoneAt), t.Assignee,
+			t.ContactID, t.CompanyID, t.DealID, t.TicketID, custom, unix(now), unix(now), t.CreatedBy)
+		return e
+	})
+	if err != nil {
+		return err
+	}
+	return s.fillTaskRef(ws, t)
+}
+
+const taskColumns = `id, handle, version, title, due_at, done_at, assignee, contact_id, company_id, deal_id, ticket_id, custom, created_at, updated_at, created_by`
+
+// GetTask loads one task scoped to the workspace.
+func (s *sqlStore) GetTask(ws, id string) (protocol.Task, error) {
+	row := s.queryRow(`SELECT `+taskColumns+` FROM tasks WHERE workspace_id = ? AND id = ?`, ws, id)
+	t, err := scanTask(row)
+	if err != nil {
+		return protocol.Task{}, err
+	}
+	if err := s.fillTaskRef(ws, &t); err != nil {
+		return protocol.Task{}, err
+	}
+	return t, nil
+}
+
+// UpdateTask overwrites mutable task fields, bumps updated_at, and increments
+// version. See UpdateContact for the ifMatch (optimistic-concurrency) semantics.
+func (s *sqlStore) UpdateTask(ws string, t *protocol.Task, ifMatch int64) error {
+	t.UpdatedAt = time.Now()
+	custom, err := marshalJSON(t.Custom)
+	if err != nil {
+		return err
+	}
+	res, err := s.exec(`
+UPDATE tasks SET title=?, due_at=?, done_at=?, assignee=?, contact_id=?, company_id=?, deal_id=?, ticket_id=?, custom=?, updated_at=?, version = version + 1
+WHERE workspace_id = ? AND id = ? AND (? <= 0 OR version = ?)`,
+		t.Title, nullableUnix(t.DueAt), nullableUnix(t.DoneAt), t.Assignee,
+		t.ContactID, t.CompanyID, t.DealID, t.TicketID, custom, unix(t.UpdatedAt), ws, t.ID, ifMatch, ifMatch)
+	if err != nil {
+		return err
+	}
+	if err := s.checkConditional(res, ws, "tasks", t.ID, ifMatch); err != nil {
+		return err
+	}
+	if err := s.reloadVersion(ws, "tasks", t.ID, &t.Version); err != nil {
+		return err
+	}
+	return s.fillTaskRef(ws, t)
+}
+
+// DeleteTask removes a task from a workspace.
+func (s *sqlStore) DeleteTask(ws, id string) error {
+	res, err := s.exec(`DELETE FROM tasks WHERE workspace_id = ? AND id = ?`, ws, id)
+	if err != nil {
+		return err
+	}
+	return affectedOne(res)
+}
+
+func scanTask(sc scanner) (protocol.Task, error) {
+	var (
+		t                           protocol.Task
+		assignee, custom, createdBy sql.NullString
+		contactID, companyID        sql.NullString
+		dealID, ticketID            sql.NullString
+		dueAt, doneAt               sql.NullInt64
+		created, upd                int64
+	)
+	err := sc.Scan(&t.ID, &t.Handle, &t.Version, &t.Title, &dueAt, &doneAt, &assignee,
+		&contactID, &companyID, &dealID, &ticketID, &custom, &created, &upd, &createdBy)
+	if errors.Is(err, sql.ErrNoRows) {
+		return protocol.Task{}, ErrNotFound
+	}
+	if err != nil {
+		return protocol.Task{}, err
+	}
+	t.DueAt = fromNullableUnix(dueAt)
+	t.DoneAt = fromNullableUnix(doneAt)
+	t.Assignee = assignee.String
+	t.ContactID, t.CompanyID = contactID.String, companyID.String
+	t.DealID, t.TicketID = dealID.String, ticketID.String
+	t.Custom = unmarshalCustom(custom.String)
+	t.CreatedAt, t.UpdatedAt = fromUnix(created), fromUnix(upd)
+	t.CreatedBy = createdBy.String
+	return t, nil
+}
+
+// fillTaskRefs resolves each task's link ids to public handles for display.
+func (s *sqlStore) fillTaskRefs(ws string, tasks []protocol.Task) error {
+	contactIDs := make([]string, 0, len(tasks))
+	companyIDs := make([]string, 0, len(tasks))
+	dealIDs := make([]string, 0, len(tasks))
+	ticketIDs := make([]string, 0, len(tasks))
+	for _, t := range tasks {
+		contactIDs = append(contactIDs, t.ContactID)
+		companyIDs = append(companyIDs, t.CompanyID)
+		dealIDs = append(dealIDs, t.DealID)
+		ticketIDs = append(ticketIDs, t.TicketID)
+	}
+	contactRefs, err := s.handlesByID(ws, "contacts", contactIDs)
+	if err != nil {
+		return err
+	}
+	companyRefs, err := s.handlesByID(ws, "companies", companyIDs)
+	if err != nil {
+		return err
+	}
+	dealRefs, err := s.handlesByID(ws, "deals", dealIDs)
+	if err != nil {
+		return err
+	}
+	ticketRefs, err := s.handlesByID(ws, "tickets", ticketIDs)
+	if err != nil {
+		return err
+	}
+	for i := range tasks {
+		tasks[i].ContactRef = contactRefs[tasks[i].ContactID]
+		tasks[i].CompanyRef = companyRefs[tasks[i].CompanyID]
+		tasks[i].DealRef = dealRefs[tasks[i].DealID]
+		tasks[i].TicketRef = ticketRefs[tasks[i].TicketID]
+	}
+	return nil
+}
+
+func (s *sqlStore) fillTaskRef(ws string, t *protocol.Task) error {
+	one := []protocol.Task{*t}
+	if err := s.fillTaskRefs(ws, one); err != nil {
+		return err
+	}
+	*t = one[0]
+	return nil
+}
+
 // ---- reminders -----------------------------------------------------------
 
-// ListReminders returns contacts and deals whose follow_up_at is at or before
-// `until`, soonest first - the agent's "what needs attention now" view.
+// ListReminders returns open tasks (done_at IS NULL) whose due_at is at or
+// before `until`, soonest first - the agent's "what needs attention now" view.
+// It is one sweep over the tasks table; About is the linked record's handle (the
+// first set of contact/company/deal/ticket), resolved for at-a-glance context.
 func (s *sqlStore) ListReminders(ws string, until time.Time, limit int) ([]protocol.Reminder, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 100
@@ -580,95 +723,78 @@ func (s *sqlStore) ListReminders(ws string, until time.Time, limit int) ([]proto
 	now := time.Now()
 	out := []protocol.Reminder{}
 
-	// Contacts first; fully read and close before the deals query because the
-	// store may run on a single connection.
-	crows, err := s.query(`SELECT id, handle, name, email, follow_up_at, follow_up_note FROM contacts
-WHERE workspace_id = ? AND follow_up_at IS NOT NULL AND follow_up_at <= ? ORDER BY follow_up_at ASC LIMIT ?`,
+	rows, err := s.query(`SELECT handle, title, assignee, due_at, contact_id, company_id, deal_id, ticket_id FROM tasks
+WHERE workspace_id = ? AND done_at IS NULL AND due_at IS NOT NULL AND due_at <= ? ORDER BY due_at ASC LIMIT ?`,
 		ws, unix(until), limit)
 	if err != nil {
 		return nil, err
 	}
-	for crows.Next() {
+	// linkKind/linkID hold each reminder's first-set link, resolved to a handle
+	// after the rows are closed (single-connection safety).
+	var linkKind, linkID []string
+	for rows.Next() {
 		var (
-			id, handle, name string
-			email, note      sql.NullString
-			fa               int64
+			handle, title        string
+			assignee             sql.NullString
+			contactID, companyID sql.NullString
+			dealID, ticketID     sql.NullString
+			due                  int64
 		)
-		if err := crows.Scan(&id, &handle, &name, &email, &fa, &note); err != nil {
-			crows.Close()
+		if err := rows.Scan(&handle, &title, &assignee, &due, &contactID, &companyID, &dealID, &ticketID); err != nil {
+			rows.Close()
 			return nil, err
 		}
-		t := fromUnix(fa)
+		t := fromUnix(due)
 		out = append(out, protocol.Reminder{
-			Handle: protocol.FormatRef(protocol.KindContact, handle), Kind: protocol.KindContact,
-			Title: name, Email: email.String, FollowUpAt: t, Note: note.String, Overdue: t.Before(now),
+			Handle: protocol.FormatRef(protocol.KindTask, handle), Kind: protocol.KindTask,
+			Title: title, Assignee: assignee.String, FollowUpAt: t, Overdue: t.Before(now),
 		})
+		k, id := firstLink(contactID.String, companyID.String, dealID.String, ticketID.String)
+		linkKind = append(linkKind, k)
+		linkID = append(linkID, id)
 	}
-	crows.Close()
-	if err := crows.Err(); err != nil {
+	rows.Close()
+	if err := rows.Err(); err != nil {
 		return nil, err
 	}
 
-	drows, err := s.query(`SELECT id, handle, title, follow_up_at, follow_up_note FROM deals
-WHERE workspace_id = ? AND follow_up_at IS NOT NULL AND follow_up_at <= ? ORDER BY follow_up_at ASC LIMIT ?`,
-		ws, unix(until), limit)
-	if err != nil {
-		return nil, err
+	// Resolve each reminder's linked record to a public handle, batched per table.
+	byTable := map[string][]string{}
+	for i := range out {
+		if tbl := handleTable[linkKind[i]]; tbl != "" {
+			byTable[tbl] = append(byTable[tbl], linkID[i])
+		}
 	}
-	for drows.Next() {
-		var (
-			id, handle, title string
-			note              sql.NullString
-			fa                int64
-		)
-		if err := drows.Scan(&id, &handle, &title, &fa, &note); err != nil {
-			drows.Close()
+	handles := map[string]string{} // internal id -> formatted ref
+	for tbl, ids := range byTable {
+		m, err := s.handlesByID(ws, tbl, ids)
+		if err != nil {
 			return nil, err
 		}
-		t := fromUnix(fa)
-		out = append(out, protocol.Reminder{
-			Handle: protocol.FormatRef(protocol.KindDeal, handle), Kind: protocol.KindDeal,
-			Title: title, FollowUpAt: t, Note: note.String, Overdue: t.Before(now),
-		})
-	}
-	drows.Close()
-	if err := drows.Err(); err != nil {
-		return nil, err
-	}
-
-	trows, err := s.query(`SELECT id, handle, subject, follow_up_at, follow_up_note FROM tickets
-WHERE workspace_id = ? AND follow_up_at IS NOT NULL AND follow_up_at <= ? ORDER BY follow_up_at ASC LIMIT ?`,
-		ws, unix(until), limit)
-	if err != nil {
-		return nil, err
-	}
-	for trows.Next() {
-		var (
-			id, handle, subject string
-			note                sql.NullString
-			fa                  int64
-		)
-		if err := trows.Scan(&id, &handle, &subject, &fa, &note); err != nil {
-			trows.Close()
-			return nil, err
+		for id, ref := range m {
+			handles[id] = ref
 		}
-		t := fromUnix(fa)
-		out = append(out, protocol.Reminder{
-			Handle: protocol.FormatRef(protocol.KindTicket, handle), Kind: protocol.KindTicket,
-			Title: subject, FollowUpAt: t, Note: note.String, Overdue: t.Before(now),
-		})
 	}
-	trows.Close()
-	if err := trows.Err(); err != nil {
-		return nil, err
-	}
-
-	// Merge the streams by due time, soonest first, and cap at limit.
-	sort.Slice(out, func(i, j int) bool { return out[i].FollowUpAt.Before(out[j].FollowUpAt) })
-	if len(out) > limit {
-		out = out[:limit]
+	for i := range out {
+		out[i].About = handles[linkID[i]]
 	}
 	return out, nil
+}
+
+// firstLink returns the kind+id of the first non-empty link among a task's
+// contact/company/deal/ticket columns, or ("","") if the task is standalone.
+func firstLink(contactID, companyID, dealID, ticketID string) (kind, id string) {
+	switch {
+	case contactID != "":
+		return protocol.KindContact, contactID
+	case companyID != "":
+		return protocol.KindCompany, companyID
+	case dealID != "":
+		return protocol.KindDeal, dealID
+	case ticketID != "":
+		return protocol.KindTicket, ticketID
+	}
+	return "", ""
 }
 
 // ---- activities ----------------------------------------------------------
@@ -1004,6 +1130,8 @@ func kindForTable(table string) string {
 		return protocol.KindDeal
 	case "tickets":
 		return protocol.KindTicket
+	case "tasks":
+		return protocol.KindTask
 	default:
 		return protocol.KindActivity
 	}

@@ -2,6 +2,39 @@
 
 All notable changes to crmkit, following [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
+## [0.5.0] - 2026-06-13
+
+### Features
+
+- Tasks: a first-class, completable unit of follow-up work with a title, optional due date, done flag, assignee, and explicit links to any of a contact/company/deal/ticket. Full CRUD at `/tasks`; complete with `PATCH /tasks/{id} {"done":true}`.
+
+### Changed
+
+- **Breaking:** `GET /reminders` now surfaces due, open **tasks** (with `about` and `assignee`) instead of per-record follow-ups. Follow-up tracking moves from a single slot per record to tasks, which allow several open items per record and can be checked off.
+
+### Removed
+
+- **Breaking:** the `follow_up_at` / `follow_up_note` fields on contacts, deals, and tickets. Existing follow-ups are migrated to linked tasks automatically (migration v18); the columns are then dropped.
+
+## [0.4.1] - 2026-06-12
+
+### Features
+
+- Campaigns carry a free-form `custom` JSON object, so they are extensible without a schema change.
+
+## [0.4.0] - 2026-06-12
+
+### Features
+
+- Campaign management: a campaign is a prospecting effort (a free-text brief plus the contacts and companies gathered under it). Full CRUD at `/campaigns`, with many-to-many membership that is deduped per campaign, and a `?campaign=` shortcut on contact/company create to attach in one call.
+- `GET /whoami` returns the workspace name alongside identity, plan, and usage.
+
+## [0.3.1] - 2026-06-11
+
+### Features
+
+- Resolve the client IP from proxy headers (`X-Forwarded-For` / `X-Real-IP`) for accurate rate limiting and audit behind a reverse proxy.
+
 ## [0.3.0] - 2026-06-08
 
 ### Features

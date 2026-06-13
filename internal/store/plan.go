@@ -50,6 +50,8 @@ func (s *sqlStore) CountResource(workspaceID, kind string) (int, error) {
 		return s.countWhere(`SELECT count(*) FROM deals WHERE workspace_id = ?`, workspaceID)
 	case "tickets":
 		return s.countWhere(`SELECT count(*) FROM tickets WHERE workspace_id = ?`, workspaceID)
+	case "tasks":
+		return s.countWhere(`SELECT count(*) FROM tasks WHERE workspace_id = ?`, workspaceID)
 	case "activities":
 		return s.countWhere(`SELECT count(*) FROM activities WHERE workspace_id = ?`, workspaceID)
 	default:

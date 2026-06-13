@@ -232,6 +232,68 @@ var migrations = []Migration{
 	{Version: 16, Name: "campaign custom", Statements: []string{
 		`ALTER TABLE campaigns ADD COLUMN custom TEXT`,
 	}},
+	// v17 (2026-06-13): tasks. A task is a single completable unit of follow-up
+	// work - a title, an optional due date, a done timestamp (NULL = open), an
+	// optional assignee, and explicit nullable links to the records it concerns
+	// (contact/company/deal/ticket). It generalises the per-entity follow_up_at
+	// slot (which was single-valued and could not be checked off): one record can
+	// now carry several open tasks, and a task can also stand alone (no link set).
+	// GET /reminders sweeps this one table instead of UNION-ing each entity.
+	{Version: 17, Name: "tasks", Statements: []string{
+		`CREATE TABLE IF NOT EXISTS tasks (
+	id           TEXT PRIMARY KEY,
+	workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+	handle       TEXT NOT NULL DEFAULT '',
+	version      BIGINT NOT NULL DEFAULT 1,
+	title        TEXT NOT NULL,
+	due_at       BIGINT,
+	done_at      BIGINT,
+	assignee     TEXT,
+	contact_id   TEXT,
+	company_id   TEXT,
+	deal_id      TEXT,
+	ticket_id    TEXT,
+	custom       TEXT,
+	created_at   BIGINT NOT NULL,
+	updated_at   BIGINT NOT NULL,
+	created_by   TEXT
+)`,
+		`CREATE INDEX IF NOT EXISTS idx_tasks_ws ON tasks(workspace_id)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_ws_handle ON tasks(workspace_id, handle)`,
+		`CREATE INDEX IF NOT EXISTS idx_tasks_due ON tasks(workspace_id, done_at, due_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_tasks_contact ON tasks(workspace_id, contact_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_tasks_company ON tasks(workspace_id, company_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_tasks_deal ON tasks(workspace_id, deal_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_tasks_ticket ON tasks(workspace_id, ticket_id)`,
+	}},
+	// v18 (2026-06-13): retire the inline follow-up slots now that tasks own that
+	// concept. Each live follow_up_at (the column GET /reminders swept) becomes an
+	// open task linked back to its record; the id/handle are derived from the
+	// source row (handle=id, the same long-but-valid backfill v10 used for
+	// handles) so the migration needs no handle generator. follow_up_note carries
+	// to the task title; an empty note falls back to a literal so the NOT NULL
+	// title holds. Note-only rows (a note but no date) were surfaced nowhere, so
+	// they are not migrated. Then the columns and their indexes are dropped.
+	{Version: 18, Name: "follow-up to tasks", Statements: []string{
+		`INSERT INTO tasks (id, workspace_id, handle, version, title, due_at, contact_id, created_at, updated_at, created_by)
+SELECT 'task_' || id, workspace_id, 'task_' || id, 1, COALESCE(NULLIF(follow_up_note, ''), 'Follow up'), follow_up_at, id, created_at, updated_at, created_by
+FROM contacts WHERE follow_up_at IS NOT NULL`,
+		`INSERT INTO tasks (id, workspace_id, handle, version, title, due_at, deal_id, created_at, updated_at, created_by)
+SELECT 'task_' || id, workspace_id, 'task_' || id, 1, COALESCE(NULLIF(follow_up_note, ''), 'Follow up'), follow_up_at, id, created_at, updated_at, created_by
+FROM deals WHERE follow_up_at IS NOT NULL`,
+		`INSERT INTO tasks (id, workspace_id, handle, version, title, due_at, ticket_id, created_at, updated_at, created_by)
+SELECT 'task_' || id, workspace_id, 'task_' || id, 1, COALESCE(NULLIF(follow_up_note, ''), 'Follow up'), follow_up_at, id, created_at, updated_at, created_by
+FROM tickets WHERE follow_up_at IS NOT NULL`,
+		`DROP INDEX IF EXISTS idx_contacts_followup`,
+		`DROP INDEX IF EXISTS idx_deals_followup`,
+		`DROP INDEX IF EXISTS idx_tickets_followup`,
+		`ALTER TABLE contacts DROP COLUMN follow_up_at`,
+		`ALTER TABLE contacts DROP COLUMN follow_up_note`,
+		`ALTER TABLE deals DROP COLUMN follow_up_at`,
+		`ALTER TABLE deals DROP COLUMN follow_up_note`,
+		`ALTER TABLE tickets DROP COLUMN follow_up_at`,
+		`ALTER TABLE tickets DROP COLUMN follow_up_note`,
+	}},
 }
 
 // MigrationState reports how the database's schema compares to the code.

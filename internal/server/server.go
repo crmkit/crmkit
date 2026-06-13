@@ -145,6 +145,14 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /tickets/{id}/activities", s.authed(s.handleListTicketActivities))
 	mux.HandleFunc("POST /tickets/{id}/activities", s.authed(s.handleCreateTicketActivity))
 
+	// Tasks: completable units of follow-up work, optionally linked to a
+	// contact/company/deal/ticket. Due, open tasks surface via GET /reminders.
+	mux.HandleFunc("GET /tasks", s.authed(s.handleListTasks))
+	mux.HandleFunc("POST /tasks", s.authed(s.handleCreateTask))
+	mux.HandleFunc("GET /tasks/{id}", s.authed(s.handleGetTask))
+	mux.HandleFunc("PATCH /tasks/{id}", s.authed(s.handleUpdateTask))
+	mux.HandleFunc("DELETE /tasks/{id}", s.authed(s.handleDeleteTask))
+
 	// Campaigns: a prospecting effort (brief + members). Members are contacts and
 	// companies attached many-to-many, deduped per campaign.
 	mux.HandleFunc("GET /campaigns", s.authed(s.handleListCampaigns))

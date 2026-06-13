@@ -38,6 +38,7 @@ var allowedPrefixes = []string{
 	"/contacts",
 	"/companies",
 	"/deals",
+	"/tasks",
 	"/campaigns",
 	"/activities",
 	"/reminders",
@@ -60,7 +61,8 @@ Core:
   POST /contacts|/companies|/deals create; POST upserts contacts by email, companies by domain
   GET|PATCH|DELETE /contacts/{id}  fetch / update / delete one (same for companies, deals)
   POST /contacts/{id}/activities   log a call|email|meeting|note|task  {"kind":...,"body":...}
-  GET  /reminders                  due/overdue follow-ups
+  GET|POST /tasks                  list / create follow-up work  {"title":..,"due_at":..,"contact_id":..}; PATCH /tasks/{id} {"done":true} to complete
+  GET  /reminders                  open tasks due now/overdue (?days=N looks ahead)
 
 Campaigns (a prospecting effort - a brief plus the contacts/companies gathered under it):
   GET|POST /campaigns              list / create  {"name":...,"description":"what you're collecting & why"}

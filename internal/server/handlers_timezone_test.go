@@ -18,15 +18,15 @@ func TestWorkspaceTimezoneFormatsReads(t *testing.T) {
 		t.Fatal("no workspace id")
 	}
 
-	// A follow-up at a known UTC instant.
-	_, body := do(t, ts, "POST", "/contacts", token, `{"name":"Jane Doe","follow_up_at":"2026-06-10T16:00:00Z"}`)
-	id := firstHandleID(body, "contact/")
+	// A task due at a known UTC instant.
+	_, body := do(t, ts, "POST", "/tasks", token, `{"title":"Send quote","due_at":"2026-06-10T16:00:00Z"}`)
+	id := firstHandleID(body, "task/")
 	if id == "" {
-		t.Fatalf("no contact id in %q", body)
+		t.Fatalf("no task id in %q", body)
 	}
 
 	// Default workspace tz is UTC: the time renders with a Z offset.
-	if _, detail := do(t, ts, "GET", "/contacts/"+id, token, ""); !strings.Contains(detail, "2026-06-10T16:00Z") {
+	if _, detail := do(t, ts, "GET", "/tasks/"+id, token, ""); !strings.Contains(detail, "2026-06-10T16:00Z") {
 		t.Fatalf("UTC default should render with Z:\n%s", detail)
 	}
 
@@ -36,7 +36,7 @@ func TestWorkspaceTimezoneFormatsReads(t *testing.T) {
 	}
 
 	// The next read (token re-resolved) renders the same instant in -07:00.
-	if _, detail := do(t, ts, "GET", "/contacts/"+id, token, ""); !strings.Contains(detail, "2026-06-10T09:00-07:00") {
+	if _, detail := do(t, ts, "GET", "/tasks/"+id, token, ""); !strings.Contains(detail, "2026-06-10T09:00-07:00") {
 		t.Fatalf("LA tz should render 16:00Z as 09:00-07:00:\n%s", detail)
 	}
 }

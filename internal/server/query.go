@@ -275,7 +275,7 @@ var contactQuery = queryConfig{
 		"name": {"name", colText}, "email": {"email", colText}, "phone": {"phone", colText},
 		"company_id": {"company_id", colText}, "owner": {"owner", colText}, "stage": {"stage", colText},
 		"created_by": {"created_by", colText},
-		"created_at": {"created_at", colTime}, "updated_at": {"updated_at", colTime}, "follow_up_at": {"follow_up_at", colTime},
+		"created_at": {"created_at", colTime}, "updated_at": {"updated_at", colTime},
 	},
 	sortBy: map[string]colSpec{
 		"created_at": {"created_at", colTime}, "updated_at": {"updated_at", colTime}, "name": {"name", colText},
@@ -306,7 +306,7 @@ var dealQuery = queryConfig{
 		"title": {"title", colText}, "stage": {"stage", colText}, "status": {"status", colText},
 		"contact_id": {"contact_id", colText}, "company_id": {"company_id", colText}, "currency": {"currency", colText},
 		"amount_cents": {"amount_cents", colInt}, "created_by": {"created_by", colText},
-		"created_at": {"created_at", colTime}, "updated_at": {"updated_at", colTime}, "follow_up_at": {"follow_up_at", colTime},
+		"created_at": {"created_at", colTime}, "updated_at": {"updated_at", colTime},
 	},
 	sortBy: map[string]colSpec{
 		"created_at": {"created_at", colTime}, "updated_at": {"updated_at", colTime},
@@ -322,7 +322,7 @@ var ticketQuery = queryConfig{
 		"subject": {"subject", colText}, "status": {"status", colText},
 		"requester_id": {"requester_id", colText}, "assignee": {"assignee", colText},
 		"created_by": {"created_by", colText},
-		"created_at": {"created_at", colTime}, "updated_at": {"updated_at", colTime}, "follow_up_at": {"follow_up_at", colTime},
+		"created_at": {"created_at", colTime}, "updated_at": {"updated_at", colTime},
 	},
 	sortBy: map[string]colSpec{
 		"created_at": {"created_at", colTime}, "updated_at": {"updated_at", colTime}, "subject": {"subject", colText},
@@ -330,6 +330,24 @@ var ticketQuery = queryConfig{
 	search:  []string{"subject", "content"},
 	defSort: "updated_at",
 	tags:    true,
+	custom:  true,
+}
+
+var taskQuery = queryConfig{
+	filter: map[string]colSpec{
+		"title": {"title", colText}, "assignee": {"assignee", colText},
+		"contact_id": {"contact_id", colText}, "company_id": {"company_id", colText},
+		"deal_id": {"deal_id", colText}, "ticket_id": {"ticket_id", colText},
+		"created_by": {"created_by", colText},
+		"due_at":     {"due_at", colTime}, "done_at": {"done_at", colTime},
+		"created_at": {"created_at", colTime}, "updated_at": {"updated_at", colTime},
+	},
+	sortBy: map[string]colSpec{
+		"created_at": {"created_at", colTime}, "updated_at": {"updated_at", colTime},
+		"due_at": {"due_at", colTime}, "title": {"title", colText},
+	},
+	search:  []string{"title"},
+	defSort: "updated_at",
 	custom:  true,
 }
 

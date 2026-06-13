@@ -2,7 +2,6 @@ package server
 
 import (
 	"testing"
-	"time"
 
 	"github.com/crmkit/crmkit/internal/protocol"
 )
@@ -78,15 +77,14 @@ func TestDiffContact(t *testing.T) {
 		t.Errorf("diffContact company = %q, want company: Acme -> co_9", got)
 	}
 
-	// Contract: notes/custom/follow-up are intentionally NOT diffed (keeps the
-	// audit detail scannable). Changing only those must produce no detail.
-	fu := time.Now()
+	// Contract: notes/custom are intentionally NOT diffed (keeps the audit detail
+	// scannable). Changing only those must produce no detail.
 	noisy := diffContact(
 		protocol.Contact{Name: "Jane"},
-		protocol.Contact{Name: "Jane", Notes: "long note", FollowUpAt: &fu, Custom: map[string]any{"k": "v"}},
+		protocol.Contact{Name: "Jane", Notes: "long note", Custom: map[string]any{"k": "v"}},
 	)
 	if noisy != "" {
-		t.Errorf("notes/custom/follow-up must be excluded from the diff, got %q", noisy)
+		t.Errorf("notes/custom must be excluded from the diff, got %q", noisy)
 	}
 }
 

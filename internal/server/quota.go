@@ -25,7 +25,7 @@ func (s *Server) planSnapshot(sess protocol.Session) (plan string, usage []Resou
 		return "", nil, err
 	}
 	wl := s.cfg.Plans.LimitsFor(plan)
-	for _, res := range []string{"contacts", "companies", "deals", "tickets", "activities", "members"} {
+	for _, res := range []string{"contacts", "companies", "deals", "tickets", "tasks", "activities", "members"} {
 		used, e := s.workspaceResourceCount(sess.WorkspaceID, res)
 		if e != nil {
 			return "", nil, e
