@@ -125,12 +125,11 @@ func TestInLocPtr(t *testing.T) {
 
 func TestContactLocalized(t *testing.T) {
 	loc := time.FixedZone("EST", -5*60*60)
-	follow := time.Date(2026, 6, 9, 12, 0, 0, 0, time.UTC)
+	last := time.Date(2026, 6, 9, 12, 0, 0, 0, time.UTC)
 	c := Contact{
-		CreatedAt:  time.Date(2026, 6, 8, 15, 0, 0, 0, time.UTC),
-		UpdatedAt:  time.Date(2026, 6, 8, 16, 0, 0, 0, time.UTC),
-		FollowUpAt: &follow,
-		// LastActivityAt left nil to exercise the nil-pointer guard.
+		CreatedAt:      time.Date(2026, 6, 8, 15, 0, 0, 0, time.UTC),
+		UpdatedAt:      time.Date(2026, 6, 8, 16, 0, 0, 0, time.UTC),
+		LastActivityAt: &last,
 	}
 
 	got := c.Localized(loc)
@@ -140,13 +139,10 @@ func TestContactLocalized(t *testing.T) {
 	if !got.CreatedAt.Equal(c.CreatedAt) || !got.UpdatedAt.Equal(c.UpdatedAt) {
 		t.Error("Localized must preserve the underlying instants")
 	}
-	if got.FollowUpAt == nil || got.FollowUpAt.Location() != loc {
-		t.Error("FollowUpAt pointer must be localized")
+	if got.LastActivityAt == nil || got.LastActivityAt.Location() != loc {
+		t.Error("LastActivityAt pointer must be localized")
 	}
-	if got.LastActivityAt != nil {
-		t.Error("a nil LastActivityAt must stay nil")
-	}
-	if follow.Location() != time.UTC {
+	if last.Location() != time.UTC {
 		t.Error("Localized must not mutate the caller's stored time through the pointer")
 	}
 }
@@ -178,10 +174,9 @@ func TestAllLocalized(t *testing.T) {
 	}
 
 	t.Run("Contact", func(t *testing.T) {
-		c := Contact{CreatedAt: utc, UpdatedAt: utc, FollowUpAt: ptr(), LastActivityAt: ptr()}.Localized(loc)
+		c := Contact{CreatedAt: utc, UpdatedAt: utc, LastActivityAt: ptr()}.Localized(loc)
 		chk("CreatedAt", c.CreatedAt)
 		chk("UpdatedAt", c.UpdatedAt)
-		chkPtr("FollowUpAt", c.FollowUpAt)
 		chkPtr("LastActivityAt", c.LastActivityAt)
 	})
 	t.Run("Company", func(t *testing.T) {
@@ -191,18 +186,23 @@ func TestAllLocalized(t *testing.T) {
 		chkPtr("LastActivityAt", c.LastActivityAt)
 	})
 	t.Run("Deal", func(t *testing.T) {
-		d := Deal{CreatedAt: utc, UpdatedAt: utc, FollowUpAt: ptr(), LastActivityAt: ptr()}.Localized(loc)
+		d := Deal{CreatedAt: utc, UpdatedAt: utc, LastActivityAt: ptr()}.Localized(loc)
 		chk("CreatedAt", d.CreatedAt)
 		chk("UpdatedAt", d.UpdatedAt)
-		chkPtr("FollowUpAt", d.FollowUpAt)
 		chkPtr("LastActivityAt", d.LastActivityAt)
 	})
 	t.Run("Ticket", func(t *testing.T) {
-		tk := Ticket{CreatedAt: utc, UpdatedAt: utc, FollowUpAt: ptr(), LastActivityAt: ptr()}.Localized(loc)
+		tk := Ticket{CreatedAt: utc, UpdatedAt: utc, LastActivityAt: ptr()}.Localized(loc)
 		chk("CreatedAt", tk.CreatedAt)
 		chk("UpdatedAt", tk.UpdatedAt)
-		chkPtr("FollowUpAt", tk.FollowUpAt)
 		chkPtr("LastActivityAt", tk.LastActivityAt)
+	})
+	t.Run("Task", func(t *testing.T) {
+		tk := Task{CreatedAt: utc, UpdatedAt: utc, DueAt: ptr(), DoneAt: ptr()}.Localized(loc)
+		chk("CreatedAt", tk.CreatedAt)
+		chk("UpdatedAt", tk.UpdatedAt)
+		chkPtr("DueAt", tk.DueAt)
+		chkPtr("DoneAt", tk.DoneAt)
 	})
 	t.Run("Activity", func(t *testing.T) {
 		a := Activity{CreatedAt: utc}.Localized(loc)

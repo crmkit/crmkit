@@ -78,6 +78,27 @@ func diffTicket(before, after protocol.Ticket) string {
 	)
 }
 
+func diffTask(before, after protocol.Task) string {
+	doneStr := func(t protocol.Task) string {
+		if t.DoneAt != nil {
+			return "done"
+		}
+		return "open"
+	}
+	dueStr := func(t protocol.Task) string {
+		if t.DueAt == nil {
+			return ""
+		}
+		return t.DueAt.Format("2006-01-02")
+	}
+	return changeDetail(
+		[3]string{"title", before.Title, after.Title},
+		[3]string{"status", doneStr(before), doneStr(after)},
+		[3]string{"due", dueStr(before), dueStr(after)},
+		[3]string{"assignee", before.Assignee, after.Assignee},
+	)
+}
+
 func diffDeal(before, after protocol.Deal) string {
 	return changeDetail(
 		[3]string{"title", before.Title, after.Title},

@@ -2,7 +2,7 @@
 name: crmkit
 description: An agent-first CRM, built for an AI agent to operate over a plain-text HTTP API. Headless by design (no UI). Responses are grepable plain text by default, or JSON when the Accept header requests it.
 content_types: [text/plain, application/json]
-capabilities: [contacts, companies, deals, activities, workspaces, members]
+capabilities: [contacts, companies, deals, tickets, tasks, campaigns, activities, workspaces, members]
 authentication:
   type: bearer
   scheme: email-otp
@@ -100,8 +100,8 @@ them to operate crmkit.
   2026-06-10T09:00-07:00 (or ...Z for UTC). Instants are stored in UTC; the
   workspace timezone (default UTC) only controls formatting. Set it with
   PATCH /workspaces/{id} {"timezone":"America/Los_Angeles"} (an IANA name). When
-  you write a time (follow_up_at), include the offset so it lands on the instant
-  the user means.
+  you write a time (a task's due_at), include the offset so it lands on the
+  instant the user means.
 - POST /contacts and /companies UPSERT: if you include an email (contacts) or
   domain (companies) that already exists, the existing record is updated (merge
   of the fields you send) instead of creating a duplicate. The response says
@@ -150,7 +150,7 @@ Filter by any allowed field as field=[op:]value ; repeated params are AND-ed:
 ?stage=lead (eq is the default operator)
 ?amount_cents=gte:100000 ops: eq ne gt gte lt lte like in is not
 ?stage=in:lead,qualified in: takes a comma-separated list
-?follow_up_at=is:null is:null / not:null check empty / non-empty
+?due_at=is:null is:null / not:null check empty / non-empty
 \*\_at fields accept RFC3339, e.g. created_at=gte:2026-01-01T00:00:00Z
 Fuzzy search across key fields: ?search=acme
 Filter by creator: ?created_by=agent@x.com - every record is stamped with the
@@ -218,6 +218,12 @@ DELETE /tickets/{id}?confirm= delete (two-step)
 GET /tickets/{id}/activities the ticket's conversation (notes/replies, newest first)
 POST /tickets/{id}/activities log {"kind":"note|call|email|meeting|task","body":...} onto the ticket
 
+GET /tasks?<filters>&search=&sort=&limit=&cursor= list/query tasks (see QUERY; search covers title; filter assignee=, contact_id=, deal_id=, company_id=, ticket_id=, due_at=, done_at=; open tasks = done_at=is:null)
+POST /tasks create {"title":...,"due_at":"2026-06-20T09:00:00Z","assignee":"agent@x.com","contact_id":"contact_..","deal_id":"deal_.."} - any of contact/company/deal/ticket may be linked, all optional
+GET /tasks/{id} fetch one task (shows its links: contact_ref, company_ref, deal_ref, ticket_ref)
+PATCH /tasks/{id} update (e.g. {"done":true} to complete, {"done":false} to reopen, {"due_at":...} to reschedule); supports If-Match / "version" for concurrency
+DELETE /tasks/{id}?confirm= delete (two-step)
+
 GET /campaigns?<filters>&search=&sort=&limit=&cursor= list/query campaigns (see QUERY; search covers name, description; filter status=active|paused|done)
 POST /campaigns create {"name":...,"description":"what you're collecting & why"} (the description is the brief)
 GET /campaigns/{id} fetch one campaign (includes member counts: contacts=N, companies=N)
@@ -228,18 +234,20 @@ POST /campaigns/{id}/members attach one {"kind":"contact","id":"contact_k7m2q","
 DELETE /campaigns/{id}/members/{kind}/{id} detach one (e.g. .../members/contact/contact_k7m2q)
 Shortcut: POST /contacts?campaign=campaign_..&reason=.. (and /companies) attaches the created/upserted record to the campaign in one call - so the usual loop is just POST /contacts?campaign=..
 
-GET /reminders?days=&limit= due/overdue follow-ups (contacts + deals + tickets due now; ?days=N looks ahead)
+GET /reminders?days=&limit= due/overdue tasks (open tasks whose due_at has arrived; each shows about=<linked record> and assignee; ?days=N looks ahead)
 GET /activities?contact=&deal=&company=&ticket=&limit= recent activities (each shows by= who logged it)
 DELETE /activities/{id} delete one activity (one-shot, no confirm; e.g. a mistake or to free quota)
 GET /audit?by=&target=&limit= audit log = record history: who did what, and what changed (an update's detail shows the field diff, e.g. "stage: lead -> customer"). by=email filters to one member; target=<handle> (e.g. contact_k7m2q) scopes it to one record's history
 
 ## REMINDERS (pull, not push)
 
-There is no background notifier. To track a follow-up, set follow_up_at (RFC3339)
-on a contact or deal, e.g. PATCH /contacts/{id} {"follow_up_at":"2026-06-10T09:00:00Z",
-"follow_up_note":"Send the renewal quote"}. Then read what is due with
-GET /reminders (overdue + due now) at the start of a session, or GET /reminders?days=7
-to look a week ahead. Clear a follow-up by PATCHing follow_up_at to null.
+There is no background notifier. To track follow-up work, create a task with a
+due_at, e.g. POST /tasks {"title":"Send the renewal quote","due_at":"2026-06-10T09:00:00Z",
+"contact_id":"contact_k7m2q"}. A record can have several open tasks, and a task
+can link any of a contact/company/deal/ticket (or none, to stand alone). Then
+read what is due with GET /reminders (overdue + due now) at the start of a
+session, or GET /reminders?days=7 to look a week ahead. Complete a task with
+PATCH /tasks/{id} {"done":true} (it then drops out of reminders).
 
 ## EXAMPLES (curl)
 

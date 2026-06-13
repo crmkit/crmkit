@@ -54,18 +54,18 @@ func TestQueryNullChecks(t *testing.T) {
 	ts := newTestServer(t)
 	tok, _ := loginAs(t, ts, "alice@acme.com")
 
-	// One contact with a follow-up, one without.
-	do(t, ts, "POST", "/contacts", tok, `{"name":"Due","email":"due@x.com","follow_up_at":"2026-01-01T00:00:00Z"}`)
-	do(t, ts, "POST", "/contacts", tok, `{"name":"None","email":"none@x.com"}`)
+	// One task with a due date, one without.
+	do(t, ts, "POST", "/tasks", tok, `{"title":"Due","due_at":"2026-01-01T00:00:00Z"}`)
+	do(t, ts, "POST", "/tasks", tok, `{"title":"None"}`)
 
-	if _, body := do(t, ts, "GET", "/contacts?follow_up_at=not:null", tok, ""); !strings.Contains(body, "# 1 contact") || !strings.Contains(body, "Due") {
-		t.Fatalf("not:null should match the one with a follow-up: %q", body)
+	if _, body := do(t, ts, "GET", "/tasks?due_at=not:null", tok, ""); !strings.Contains(body, "# 1 task") || !strings.Contains(body, "Due") {
+		t.Fatalf("not:null should match the one with a due date: %q", body)
 	}
-	if _, body := do(t, ts, "GET", "/contacts?follow_up_at=is:null", tok, ""); !strings.Contains(body, "# 1 contact") || !strings.Contains(body, "None") {
+	if _, body := do(t, ts, "GET", "/tasks?due_at=is:null", tok, ""); !strings.Contains(body, "# 1 task") || !strings.Contains(body, "None") {
 		t.Fatalf("is:null should match the one without: %q", body)
 	}
 	// is/not only accept null.
-	if st, body := do(t, ts, "GET", "/contacts?follow_up_at=is:today", tok, ""); st != http.StatusBadRequest || !strings.Contains(body, "invalid_value") {
+	if st, body := do(t, ts, "GET", "/tasks?due_at=is:today", tok, ""); st != http.StatusBadRequest || !strings.Contains(body, "invalid_value") {
 		t.Fatalf("is:today should 400, got %d %q", st, body)
 	}
 }

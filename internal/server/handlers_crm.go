@@ -84,6 +84,7 @@ var auditKinds = map[string]bool{
 	protocol.KindCompany: true,
 	protocol.KindDeal:    true,
 	protocol.KindTicket:  true,
+	protocol.KindTask:    true,
 }
 
 // resolveAuditTarget turns a record reference (a handle like "contact_k7m2q")
@@ -904,6 +905,157 @@ func (s *Server) handleDeleteTicket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.audit(sess, "ticket.delete", protocol.Handle(protocol.KindTicket, id), "")
+	render.Text(w, r, http.StatusOK, "OK deleted "+r.PathValue("id"))
+}
+
+// ---- tasks ---------------------------------------------------------------
+
+// applyDone translates the write-only `done` convenience into DoneAt: true
+// stamps now (unless already done), false clears it. The flag is then cleared so
+// it never reaches the store.
+func applyDone(t *protocol.Task) {
+	if t.Done == nil {
+		return
+	}
+	if *t.Done {
+		if t.DoneAt == nil {
+			now := time.Now()
+			t.DoneAt = &now
+		}
+	} else {
+		t.DoneAt = nil
+	}
+	t.Done = nil
+}
+
+// resolveTaskLinks turns any handle a client sent for a task's links into the
+// internal id (a blank or already-internal value is left as-is).
+func (s *Server) resolveTaskLinks(ws string, t *protocol.Task) {
+	t.ContactID = s.relationID(ws, protocol.KindContact, t.ContactID)
+	t.CompanyID = s.relationID(ws, protocol.KindCompany, t.CompanyID)
+	t.DealID = s.relationID(ws, protocol.KindDeal, t.DealID)
+	t.TicketID = s.relationID(ws, protocol.KindTicket, t.TicketID)
+}
+
+func (s *Server) handleListTasks(w http.ResponseWriter, r *http.Request) {
+	sess := sessionFrom(r)
+	q, err := parseListQuery(r, taskQuery)
+	if err != nil {
+		s.writeQueryError(w, r, err)
+		return
+	}
+	list, next, err := s.store.QueryTasks(sess.WorkspaceID, q)
+	if err != nil {
+		s.serverErr(w, r)
+		return
+	}
+	list = localizedSlice(list, locationOf(sess))
+	s.respondList(w, r, list, render.Tasks(list), next)
+}
+
+func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
+	sess := sessionFrom(r)
+	var t protocol.Task
+	if err := decodeJSON(r, &t); err != nil {
+		render.Error(w, r, http.StatusBadRequest, "bad_request",
+			`Send JSON, e.g. {"title":"Send renewal quote","due_at":"2026-06-20T09:00:00Z","contact_id":"contact_.."}.`)
+		return
+	}
+	if strings.TrimSpace(t.Title) == "" {
+		render.Error(w, r, http.StatusBadRequest, "missing_field", `"title" is required to create a task.`)
+		return
+	}
+	if !s.enforceWorkspaceQuota(w, r, sess.WorkspaceID, "tasks") {
+		return
+	}
+	t.CreatedBy = sess.Email // stamp the actor; never trust a client-supplied value
+	applyDone(&t)
+	s.resolveTaskLinks(sess.WorkspaceID, &t)
+	if err := s.store.CreateTask(sess.WorkspaceID, &t); err != nil {
+		s.serverErr(w, r)
+		return
+	}
+	s.audit(sess, "task.create", protocol.Handle(protocol.KindTask, t.ID), t.Title)
+	t = t.Localized(locationOf(sess))
+	render.Respond(w, r, http.StatusCreated, t, render.Task(t))
+}
+
+func (s *Server) handleGetTask(w http.ResponseWriter, r *http.Request) {
+	sess := sessionFrom(r)
+	id, ok := s.resolveID(w, r, protocol.KindTask)
+	if !ok {
+		return
+	}
+	t, err := s.store.GetTask(sess.WorkspaceID, id)
+	if errors.Is(err, store.ErrNotFound) {
+		s.notFound(w, r, "task")
+		return
+	}
+	if err != nil {
+		s.serverErr(w, r)
+		return
+	}
+	t = t.Localized(locationOf(sess))
+	render.Respond(w, r, http.StatusOK, t, render.Task(t))
+}
+
+func (s *Server) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
+	sess := sessionFrom(r)
+	id, ok := s.resolveID(w, r, protocol.KindTask)
+	if !ok {
+		return
+	}
+	t, err := s.store.GetTask(sess.WorkspaceID, id)
+	if errors.Is(err, store.ErrNotFound) {
+		s.notFound(w, r, "task")
+		return
+	}
+	if err != nil {
+		s.serverErr(w, r)
+		return
+	}
+	before := t
+	body, err := readBody(r)
+	if err != nil {
+		render.Error(w, r, http.StatusBadRequest, "bad_request", "Could not read the request body.")
+		return
+	}
+	if err := decodeBytes(body, &t); err != nil {
+		render.Error(w, r, http.StatusBadRequest, "bad_request",
+			`Send a JSON object with only the fields you want to change, e.g. {"done":true} or {"due_at":"2026-06-20T09:00:00Z"}.`)
+		return
+	}
+	if strings.TrimSpace(t.Title) == "" {
+		render.Error(w, r, http.StatusBadRequest, "missing_field", `"title" cannot be blank.`)
+		return
+	}
+	applyDone(&t)
+	s.resolveTaskLinks(sess.WorkspaceID, &t)
+	if s.writeUpdateErr(w, r, "task", s.store.UpdateTask(sess.WorkspaceID, &t, expectedVersion(r, body))) {
+		return
+	}
+	s.audit(sess, "task.update", protocol.Handle(protocol.KindTask, t.ID), diffTask(before, t))
+	t = t.Localized(locationOf(sess))
+	render.Respond(w, r, http.StatusOK, t, render.Task(t))
+}
+
+func (s *Server) handleDeleteTask(w http.ResponseWriter, r *http.Request) {
+	sess := sessionFrom(r)
+	id, ok := s.resolveID(w, r, protocol.KindTask)
+	if !ok {
+		return
+	}
+	if !s.requireConfirm(w, r, protocol.KindTask, id) {
+		return
+	}
+	if err := s.store.DeleteTask(sess.WorkspaceID, id); errors.Is(err, store.ErrNotFound) {
+		s.notFound(w, r, "task")
+		return
+	} else if err != nil {
+		s.serverErr(w, r)
+		return
+	}
+	s.audit(sess, "task.delete", protocol.Handle(protocol.KindTask, id), "")
 	render.Text(w, r, http.StatusOK, "OK deleted "+r.PathValue("id"))
 }
 

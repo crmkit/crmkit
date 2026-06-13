@@ -76,7 +76,6 @@ func ContactLine(c protocol.Contact) string {
 		F("stage", c.Stage),
 		F("owner", c.Owner),
 		F("tags", strings.Join(c.Tags, ",")),
-		F("followup", datep(c.FollowUpAt)),
 		F("updated", date(c.UpdatedAt)),
 	)
 }
@@ -106,8 +105,6 @@ func Contact(c protocol.Contact) string {
 		F("owner", c.Owner),
 		F("tags", strings.Join(c.Tags, ", ")),
 		F("notes", c.Notes),
-		F("follow_up", datep(c.FollowUpAt)),
-		F("follow_up_note", c.FollowUpNote),
 		F("created", date(c.CreatedAt)),
 		F("created_by", c.CreatedBy),
 		F("updated", date(c.UpdatedAt)),
@@ -211,7 +208,6 @@ func DealLine(d protocol.Deal) string {
 		F("status", d.Status),
 		F("contact", nameOrID(d.ContactName, d.ContactHandle)),
 		F("company", nameOrID(d.CompanyName, d.CompanyHandle)),
-		F("followup", datep(d.FollowUpAt)),
 		F("updated", date(d.UpdatedAt)),
 	)
 }
@@ -244,8 +240,6 @@ func Deal(d protocol.Deal) string {
 		F("contact_ref", d.ContactHandle),
 		F("company", d.CompanyName),
 		F("company_ref", d.CompanyHandle),
-		F("follow_up", datep(d.FollowUpAt)),
-		F("follow_up_note", d.FollowUpNote),
 		F("created", date(d.CreatedAt)),
 		F("created_by", d.CreatedBy),
 		F("updated", date(d.UpdatedAt)),
@@ -266,7 +260,6 @@ func TicketLine(t protocol.Ticket) string {
 		F("requester", nameOrID(t.RequesterName, t.RequesterHandle)),
 		F("assignee", t.Assignee),
 		F("tags", strings.Join(t.Tags, ",")),
-		F("followup", datep(t.FollowUpAt)),
 		F("updated", date(t.UpdatedAt)),
 	)
 }
@@ -294,8 +287,6 @@ func Ticket(t protocol.Ticket) string {
 		F("assignee", t.Assignee),
 		F("tags", strings.Join(t.Tags, ", ")),
 		F("content", t.Content),
-		F("follow_up", datep(t.FollowUpAt)),
-		F("follow_up_note", t.FollowUpNote),
 		F("created", date(t.CreatedAt)),
 		F("created_by", t.CreatedBy),
 		F("updated", date(t.UpdatedAt)),
@@ -394,9 +385,73 @@ func Activities(list []protocol.Activity) string {
 	return b.String()
 }
 
+// ---- tasks ---------------------------------------------------------------
+
+// taskAbout returns the first non-empty linked-record ref on a task, for the
+// at-a-glance "about" column. Full detail shows every link separately.
+func taskAbout(t protocol.Task) string {
+	return fallback(t.ContactRef, fallback(t.CompanyRef, fallback(t.DealRef, t.TicketRef)))
+}
+
+// doneFlag renders a task's completion as a short yes/"".
+func doneFlag(t protocol.Task) string {
+	if t.DoneAt != nil {
+		return "yes"
+	}
+	return ""
+}
+
+// TaskLine renders a task as one grepable line.
+func TaskLine(t protocol.Task) string {
+	return Line(protocol.FormatRef(protocol.KindTask, t.Handle),
+		F("title", t.Title),
+		F("due", datep(t.DueAt)),
+		F("done", doneFlag(t)),
+		F("assignee", t.Assignee),
+		F("about", taskAbout(t)),
+	)
+}
+
+// Tasks renders a list of tasks with a count + open summary.
+func Tasks(list []protocol.Task) string {
+	b := strings.Builder{}
+	open := 0
+	for _, t := range list {
+		b.WriteString(TaskLine(t))
+		b.WriteByte('\n')
+		if t.DoneAt == nil {
+			open++
+		}
+	}
+	fmt.Fprintf(&b, "# %d task(s), %d open", len(list), open)
+	return b.String()
+}
+
+// Task renders a full task detail block.
+func Task(t protocol.Task) string {
+	fields := []Field{
+		F("handle", protocol.FormatRef(protocol.KindTask, t.Handle)),
+		F("version", verStr(t.Version)),
+		F("title", t.Title),
+		F("due", datep(t.DueAt)),
+		F("done", doneFlag(t)),
+		F("done_at", datep(t.DoneAt)),
+		F("assignee", t.Assignee),
+		F("contact_ref", t.ContactRef),
+		F("company_ref", t.CompanyRef),
+		F("deal_ref", t.DealRef),
+		F("ticket_ref", t.TicketRef),
+		F("created", date(t.CreatedAt)),
+		F("created_by", t.CreatedBy),
+		F("updated", date(t.UpdatedAt)),
+	}
+	fields = append(fields, customFields(t.Custom)...)
+	return Record(fields...)
+}
+
 // ---- reminders -----------------------------------------------------------
 
-// ReminderLine renders a due/overdue follow-up as one grepable line.
+// ReminderLine renders a due/overdue task as one grepable line.
 func ReminderLine(r protocol.Reminder) string {
 	overdue := ""
 	if r.Overdue {
@@ -406,8 +461,8 @@ func ReminderLine(r protocol.Reminder) string {
 		F("due", date(r.FollowUpAt)),
 		F("overdue", overdue),
 		F("title", r.Title),
-		F("email", r.Email),
-		F("note", r.Note),
+		F("about", r.About),
+		F("assignee", r.Assignee),
 	)
 }
 

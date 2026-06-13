@@ -116,24 +116,30 @@ func TestTicketReminders(t *testing.T) {
 	ts := newTestServer(t)
 	token := authenticate(t, ts)
 
-	// A ticket due in the past surfaces in reminders as overdue.
-	_, b := do(t, ts, "POST", "/tickets", token, `{"subject":"Chase refund","follow_up_at":"2020-01-01T09:00:00Z"}`)
+	// A task linked to a ticket, due in the past, surfaces in reminders as overdue
+	// and names the ticket via the "about" column.
+	_, b := do(t, ts, "POST", "/tickets", token, `{"subject":"Chase refund"}`)
 	tid := firstHandleID(b, "ticket/")
 	if tid == "" {
 		t.Fatalf("no ticket handle: %s", b)
 	}
+	_, tb := do(t, ts, "POST", "/tasks", token, `{"title":"Nudge customer","due_at":"2020-01-01T09:00:00Z","ticket_id":"`+tid+`"}`)
+	taskID := firstHandleID(tb, "task/")
+	if taskID == "" {
+		t.Fatalf("no task handle: %s", tb)
+	}
 
 	_, rb := do(t, ts, "GET", "/reminders", token, "")
-	if !strings.Contains(rb, "ticket_"+tid) || !strings.Contains(rb, "Chase refund") || !strings.Contains(rb, "overdue=yes") {
-		t.Fatalf("reminders should surface the overdue ticket:\n%s", rb)
+	if !strings.Contains(rb, "Nudge customer") || !strings.Contains(rb, "about=ticket_"+tid) || !strings.Contains(rb, "overdue=yes") {
+		t.Fatalf("reminders should surface the overdue task about the ticket:\n%s", rb)
 	}
 
-	// Clearing the follow-up removes it from reminders.
-	if s, _ := do(t, ts, "PATCH", "/tickets/"+tid, token, `{"follow_up_at":null}`); s != 200 {
-		t.Fatalf("clear follow_up: %d", s)
+	// Completing the task removes it from reminders.
+	if s, _ := do(t, ts, "PATCH", "/tasks/"+taskID, token, `{"done":true}`); s != 200 {
+		t.Fatalf("complete task: %d", s)
 	}
-	if _, rb := do(t, ts, "GET", "/reminders", token, ""); strings.Contains(rb, "ticket_"+tid) {
-		t.Fatalf("cleared ticket should not appear in reminders:\n%s", rb)
+	if _, rb := do(t, ts, "GET", "/reminders", token, ""); strings.Contains(rb, "Nudge customer") {
+		t.Fatalf("completed task should not appear in reminders:\n%s", rb)
 	}
 }
 

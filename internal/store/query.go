@@ -290,6 +290,40 @@ func (s *sqlStore) QueryTickets(ws string, q Query) ([]protocol.Ticket, string, 
 	return out, next, nil
 }
 
+// QueryTasks runs a validated query over tasks.
+func (s *sqlStore) QueryTasks(ws string, q Query) ([]protocol.Task, string, error) {
+	sqlStr, args := s.buildListSQL("tasks", taskColumns, ws, q)
+	rows, err := s.query(sqlStr, args...)
+	if err != nil {
+		return nil, "", err
+	}
+	out := []protocol.Task{}
+	for rows.Next() {
+		t, err := scanTask(rows)
+		if err != nil {
+			rows.Close()
+			return nil, "", err
+		}
+		out = append(out, t)
+	}
+	err = rows.Err()
+	rows.Close() // close before the relation-resolution query (single-connection safety)
+	if err != nil {
+		return nil, "", err
+	}
+	next := ""
+	if len(out) > q.Limit {
+		last := out[q.Limit-1]
+		out = out[:q.Limit]
+		col, _, _ := q.effectiveSort()
+		next = q.nextCursor(taskSortVal(last, col), last.ID)
+	}
+	if err := s.fillTaskRefs(ws, out); err != nil {
+		return nil, "", err
+	}
+	return out, next, nil
+}
+
 // QueryCampaigns runs a validated query over campaigns.
 func (s *sqlStore) QueryCampaigns(ws string, q Query) ([]protocol.Campaign, string, error) {
 	sqlStr, args := s.buildListSQL("campaigns", campaignColumns, ws, q)
@@ -336,6 +370,22 @@ func ticketSortVal(t protocol.Ticket, col string) string {
 	switch col {
 	case "subject":
 		return t.Subject
+	case "created_at":
+		return strconv.FormatInt(t.CreatedAt.Unix(), 10)
+	default:
+		return strconv.FormatInt(t.UpdatedAt.Unix(), 10)
+	}
+}
+
+func taskSortVal(t protocol.Task, col string) string {
+	switch col {
+	case "title":
+		return t.Title
+	case "due_at":
+		if t.DueAt == nil {
+			return "0"
+		}
+		return strconv.FormatInt(t.DueAt.Unix(), 10)
 	case "created_at":
 		return strconv.FormatInt(t.CreatedAt.Unix(), 10)
 	default:

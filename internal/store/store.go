@@ -129,6 +129,14 @@ type Store interface {
 	UpdateTicket(ws string, t *protocol.Ticket, ifMatch int64) error
 	DeleteTicket(ws, id string) error
 
+	// tasks: a completable unit of follow-up work, optionally linked to a
+	// contact/company/deal/ticket. Supersedes the per-record follow_up slot.
+	CreateTask(ws string, t *protocol.Task) error
+	GetTask(ws, id string) (protocol.Task, error)
+	QueryTasks(ws string, q Query) ([]protocol.Task, string, error)
+	UpdateTask(ws string, t *protocol.Task, ifMatch int64) error
+	DeleteTask(ws, id string) error
+
 	// campaigns: a prospecting effort (brief + members). Membership is
 	// many-to-many and deduped per campaign; AttachMember is idempotent.
 	CreateCampaign(ws string, c *protocol.Campaign) error

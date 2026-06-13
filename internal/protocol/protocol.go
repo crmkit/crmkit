@@ -20,6 +20,7 @@ const (
 	KindActivity = "activity"
 	KindTicket   = "ticket"
 	KindCampaign = "campaign"
+	KindTask     = "task"
 )
 
 // idAlphabet is a lowercase, unambiguous base32 alphabet used for IDs.
@@ -191,12 +192,8 @@ type Contact struct {
 	Tags          []string       `json:"tags,omitempty"`
 	Notes         string         `json:"notes,omitempty"`
 	Custom        map[string]any `json:"custom,omitempty"`
-	// FollowUpAt is when this contact should next be followed up (RFC3339).
-	// Send null to clear it. Agents read due/overdue items via GET /reminders.
-	FollowUpAt   *time.Time `json:"follow_up_at,omitempty"`
-	FollowUpNote string     `json:"follow_up_note,omitempty"`
-	CreatedAt    time.Time  `json:"created_at"`
-	UpdatedAt    time.Time  `json:"updated_at"`
+	CreatedAt     time.Time      `json:"created_at"`
+	UpdatedAt     time.Time      `json:"updated_at"`
 	// CreatedBy is the member (human or agent) who created this record, stamped
 	// once at creation. Persisted; never changes.
 	CreatedBy string `json:"created_by,omitempty"`
@@ -247,12 +244,8 @@ type Deal struct {
 	Stage         string         `json:"stage,omitempty"`
 	Status        string         `json:"status,omitempty"` // open | won | lost
 	Custom        map[string]any `json:"custom,omitempty"`
-	// FollowUpAt is when this deal should next be advanced (RFC3339). Send null
-	// to clear it. Agents read due/overdue items via GET /reminders.
-	FollowUpAt   *time.Time `json:"follow_up_at,omitempty"`
-	FollowUpNote string     `json:"follow_up_note,omitempty"`
-	CreatedAt    time.Time  `json:"created_at"`
-	UpdatedAt    time.Time  `json:"updated_at"`
+	CreatedAt     time.Time      `json:"created_at"`
+	UpdatedAt     time.Time      `json:"updated_at"`
 	// CreatedBy is the member (human or agent) who created this record, stamped
 	// once at creation. Persisted; never changes.
 	CreatedBy string `json:"created_by,omitempty"`
@@ -281,16 +274,11 @@ type Ticket struct {
 	RequesterHandle string `json:"requester_handle,omitempty"`
 	// Assignee is the member (human or agent) handling the ticket - an email,
 	// mirroring `owner` on other entities.
-	Assignee string         `json:"assignee,omitempty"`
-	Tags     []string       `json:"tags,omitempty"`
-	Custom   map[string]any `json:"custom,omitempty"`
-	// FollowUpAt is when this ticket should next be acted on (e.g. nudge the
-	// customer). Send null to clear it. Due/overdue tickets surface via GET
-	// /reminders.
-	FollowUpAt   *time.Time `json:"follow_up_at,omitempty"`
-	FollowUpNote string     `json:"follow_up_note,omitempty"`
-	CreatedAt    time.Time  `json:"created_at"`
-	UpdatedAt    time.Time  `json:"updated_at"`
+	Assignee  string         `json:"assignee,omitempty"`
+	Tags      []string       `json:"tags,omitempty"`
+	Custom    map[string]any `json:"custom,omitempty"`
+	CreatedAt time.Time      `json:"created_at"`
+	UpdatedAt time.Time      `json:"updated_at"`
 	// CreatedBy is the member who opened the ticket, stamped once. Persisted.
 	CreatedBy string `json:"created_by,omitempty"`
 	// ActivityCount / LastActivityAt summarise the ticket's conversation,
@@ -314,7 +302,7 @@ type Campaign struct {
 	Status    string         `json:"status,omitempty"`
 	Custom    map[string]any `json:"custom,omitempty"` // free-form extension fields, like every other entity
 	CreatedAt time.Time      `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	UpdatedAt time.Time      `json:"updated_at"`
 	// CreatedBy is the member (human or agent) who created this campaign, stamped
 	// once at creation. Persisted; never changes.
 	CreatedBy string `json:"created_by,omitempty"`
@@ -337,17 +325,55 @@ type CampaignMember struct {
 	AddedAt time.Time `json:"added_at"`
 }
 
-// Reminder is a due/overdue follow-up surfaced by GET /reminders - a contact,
-// deal, or ticket whose follow_up_at has arrived. Agents pull these instead of
-// the server pushing notifications.
+// Reminder is a due/overdue task surfaced by GET /reminders - a task whose
+// due_at has arrived and is not yet done. Agents pull these instead of the
+// server pushing notifications. Handle is the task's reference; About is the
+// reference of the record it concerns (a contact/company/deal/ticket), if any.
 type Reminder struct {
-	Handle     string    `json:"handle"` // e.g. contact_k7m2q / deal_… / ticket_…
-	Kind       string    `json:"kind"`   // contact | deal | ticket
-	Title      string    `json:"title"`  // contact name, deal title, or ticket subject
-	Email      string    `json:"email,omitempty"`
-	FollowUpAt time.Time `json:"follow_up_at"`
-	Note       string    `json:"note,omitempty"`
+	Handle     string    `json:"handle"`          // the task, e.g. task_k7m2q
+	Kind       string    `json:"kind"`            // always "task"
+	Title      string    `json:"title"`           // the task title
+	About      string    `json:"about,omitempty"` // the linked record's ref, if any
+	Assignee   string    `json:"assignee,omitempty"`
+	FollowUpAt time.Time `json:"due_at"`
 	Overdue    bool      `json:"overdue"`
+}
+
+// Task is a single completable unit of follow-up work. It carries a title, an
+// optional due date, a done timestamp (nil = open), an optional assignee, and
+// explicit nullable links to the records it concerns (any combination of
+// contact/company/deal/ticket, or none for a standalone task). It supersedes the
+// old per-record follow_up_at slot: a record can have several open tasks, and a
+// task can be checked off. Due, not-done tasks surface via GET /reminders.
+type Task struct {
+	ID      string     `json:"id"`
+	Handle  string     `json:"handle,omitempty"`  // short public reference; see Contact.Handle
+	Version int64      `json:"version,omitempty"` // optimistic-concurrency token; see Contact.Version
+	Title   string     `json:"title"`
+	DueAt   *time.Time `json:"due_at,omitempty"`  // when it's due (RFC3339); null to clear
+	DoneAt  *time.Time `json:"done_at,omitempty"` // when completed; absent = open
+	// Done is a write-only convenience: PATCH {"done":true} stamps DoneAt=now,
+	// {"done":false} clears it. It is never persisted or returned (DoneAt is the
+	// source of truth); the handler consumes and clears it.
+	Done *bool `json:"done,omitempty"`
+	// Assignee is the member (human or agent) responsible - an email, mirroring
+	// `assignee` on tickets and `owner` on contacts.
+	Assignee  string `json:"assignee,omitempty"`
+	ContactID string `json:"contact_id,omitempty"`
+	CompanyID string `json:"company_id,omitempty"`
+	DealID    string `json:"deal_id,omitempty"`
+	TicketID  string `json:"ticket_id,omitempty"`
+	// *Ref fields are the resolved public handles of the linked records,
+	// populated on read for display (never persisted).
+	ContactRef string         `json:"contact_ref,omitempty"`
+	CompanyRef string         `json:"company_ref,omitempty"`
+	DealRef    string         `json:"deal_ref,omitempty"`
+	TicketRef  string         `json:"ticket_ref,omitempty"`
+	Custom     map[string]any `json:"custom,omitempty"`
+	CreatedAt  time.Time      `json:"created_at"`
+	UpdatedAt  time.Time      `json:"updated_at"`
+	// CreatedBy is the member who created the task, stamped once. Persisted.
+	CreatedBy string `json:"created_by,omitempty"`
 }
 
 // Activity is a logged interaction (note, call, email, meeting) attached to a
@@ -396,7 +422,6 @@ func inLocPtr(t *time.Time, loc *time.Location) *time.Time {
 func (c Contact) Localized(loc *time.Location) Contact {
 	c.CreatedAt = inLoc(c.CreatedAt, loc)
 	c.UpdatedAt = inLoc(c.UpdatedAt, loc)
-	c.FollowUpAt = inLocPtr(c.FollowUpAt, loc)
 	c.LastActivityAt = inLocPtr(c.LastActivityAt, loc)
 	return c
 }
@@ -413,7 +438,6 @@ func (c Company) Localized(loc *time.Location) Company {
 func (d Deal) Localized(loc *time.Location) Deal {
 	d.CreatedAt = inLoc(d.CreatedAt, loc)
 	d.UpdatedAt = inLoc(d.UpdatedAt, loc)
-	d.FollowUpAt = inLocPtr(d.FollowUpAt, loc)
 	d.LastActivityAt = inLocPtr(d.LastActivityAt, loc)
 	return d
 }
@@ -428,8 +452,16 @@ func (a Activity) Localized(loc *time.Location) Activity {
 func (t Ticket) Localized(loc *time.Location) Ticket {
 	t.CreatedAt = inLoc(t.CreatedAt, loc)
 	t.UpdatedAt = inLoc(t.UpdatedAt, loc)
-	t.FollowUpAt = inLocPtr(t.FollowUpAt, loc)
 	t.LastActivityAt = inLocPtr(t.LastActivityAt, loc)
+	return t
+}
+
+// Localized returns a copy of the task with its instants expressed in loc.
+func (t Task) Localized(loc *time.Location) Task {
+	t.CreatedAt = inLoc(t.CreatedAt, loc)
+	t.UpdatedAt = inLoc(t.UpdatedAt, loc)
+	t.DueAt = inLocPtr(t.DueAt, loc)
+	t.DoneAt = inLocPtr(t.DoneAt, loc)
 	return t
 }
 
