@@ -2,6 +2,12 @@
 
 All notable changes to crmkit, following [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
+## [0.5.1] - 2026-06-13
+
+### Fixed
+
+- Plan limits: a configured plan that omitted a resource cap (e.g. `max_tasks`) silently capped it at 0, rejecting every create with `plan_limit_reached`. Each cap is now optional and distinct from an explicit `0`: an omitted limit inherits the built-in default, an explicit `0` means "none allowed", and `-1` stays unlimited.
+
 ## [0.5.0] - 2026-06-13
 
 ### Features

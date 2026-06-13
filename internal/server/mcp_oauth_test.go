@@ -35,7 +35,7 @@ func newOAuthServer(t *testing.T) (*httptest.Server, *captureMailer) {
 	// unlimited limits so e.g. creating a second workspace at the picker isn't
 	// blocked by the basic plan's max_workspaces=1.
 	if pl, ok := cfg.Plans.Catalogue[cfg.Plans.Default]; ok {
-		pl.MaxWorkspaces, pl.MaxMembers, pl.MaxContacts, pl.MaxCompanies, pl.MaxDeals = -1, -1, -1, -1, -1
+		pl.MaxWorkspaces, pl.MaxMembers, pl.MaxContacts, pl.MaxCompanies, pl.MaxDeals = limitPtr(-1), limitPtr(-1), limitPtr(-1), limitPtr(-1), limitPtr(-1)
 		cfg.Plans.Catalogue[cfg.Plans.Default] = pl
 	}
 	srv := New(cfg, st, memoryRL(t))

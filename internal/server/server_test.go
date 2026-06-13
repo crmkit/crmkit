@@ -48,7 +48,7 @@ func newTestServer(t *testing.T) *httptest.Server {
 	// max_members=1 blocks role/escalation tests that need a second member. Quota
 	// enforcement is covered separately by quota_test.go (its own low-limit config).
 	if pl, ok := cfg.Plans.Catalogue[cfg.Plans.Default]; ok {
-		pl.MaxWorkspaces, pl.MaxMembers, pl.MaxContacts, pl.MaxCompanies, pl.MaxDeals = -1, -1, -1, -1, -1
+		pl.MaxWorkspaces, pl.MaxMembers, pl.MaxContacts, pl.MaxCompanies, pl.MaxDeals = limitPtr(-1), limitPtr(-1), limitPtr(-1), limitPtr(-1), limitPtr(-1)
 		cfg.Plans.Catalogue[cfg.Plans.Default] = pl
 	}
 	srv := New(cfg, st, memoryRL(t))

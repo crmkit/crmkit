@@ -41,7 +41,7 @@ func (s *Server) planSnapshot(sess protocol.Session) (plan string, usage []Resou
 	if err != nil {
 		return "", nil, err
 	}
-	usage = append(usage, ResourceUsage{"workspaces", wsCount, s.cfg.Plans.LimitsFor(userPlan).MaxWorkspaces})
+	usage = append(usage, ResourceUsage{"workspaces", wsCount, s.cfg.Plans.LimitsFor(userPlan).For("workspaces")})
 	return plan, usage, nil
 }
 
@@ -87,7 +87,7 @@ func (s *Server) enforceWorkspaceCreateQuota(w http.ResponseWriter, r *http.Requ
 		s.serverErr(w, r)
 		return false
 	}
-	limit := s.cfg.Plans.LimitsFor(plan).MaxWorkspaces
+	limit := s.cfg.Plans.LimitsFor(plan).For("workspaces")
 	if limit < 0 {
 		return true
 	}
@@ -111,7 +111,7 @@ func (s *Server) canCreateWorkspace(userID string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	limit := s.cfg.Plans.LimitsFor(plan).MaxWorkspaces
+	limit := s.cfg.Plans.LimitsFor(plan).For("workspaces")
 	if limit < 0 {
 		return true, nil
 	}

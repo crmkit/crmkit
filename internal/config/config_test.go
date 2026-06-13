@@ -1,6 +1,7 @@
 package config
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -88,16 +89,65 @@ func TestPlanDefaults(t *testing.T) {
 	if !ok {
 		t.Fatal("basic plan missing from the catalogue")
 	}
-	if l.MaxContacts <= 0 || l.MaxWorkspaces <= 0 || l.MaxMembers <= 0 {
+	if l.For("contacts") <= 0 || l.For("workspaces") <= 0 || l.For("members") <= 0 {
 		t.Errorf("basic limits look unset: %+v", l)
 	}
 	// Unknown plan falls back to the default plan's limits.
-	if c.Plans.LimitsFor("does-not-exist").MaxContacts != l.MaxContacts {
+	if c.Plans.LimitsFor("does-not-exist").For("contacts") != l.For("contacts") {
 		t.Error("LimitsFor(unknown) should fall back to the default plan")
 	}
 	// Resource name mapping; unknown resource is unlimited.
-	if l.For("contacts") != l.MaxContacts || l.For("workspaces") != l.MaxWorkspaces || l.For("nope") != -1 {
+	want := defaultBasicLimits()
+	if l.For("contacts") != want.For("contacts") || l.For("workspaces") != want.For("workspaces") || l.For("nope") != -1 {
 		t.Errorf("For() mapping wrong: %+v", l)
+	}
+}
+
+// TestPlanLimitBackfill pins the three-way cap semantics that a plain int can't
+// express, so the drift bug (a plan omitting a newer limit like max_tasks) can't
+// recur: an OMITTED key falls back to the built-in default (never a silent 0 cap
+// that rejects every create); an explicit 0 means "none allowed" and is honored
+// literally; an explicit -1 (unlimited) is preserved.
+func TestPlanLimitBackfill(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "crmkit.yaml")
+	// "founder" sets one limit and omits the rest (incl. max_tasks); "loose"
+	// opts tasks out with -1; "strict" sets an explicit 0 task cap.
+	yaml := "" +
+		"plans:\n" +
+		"  default: founder\n" +
+		"  catalogue:\n" +
+		"    founder:\n" +
+		"      max_contacts: 5000\n" +
+		"    loose:\n" +
+		"      max_tasks: -1\n" +
+		"    strict:\n" +
+		"      max_tasks: 0\n"
+	if err := os.WriteFile(path, []byte(yaml), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	def := defaultBasicLimits()
+	founder := cfg.Plans.LimitsFor("founder")
+	if founder.For("contacts") != 5000 {
+		t.Errorf("explicit max_contacts overwritten: got %d, want 5000", founder.For("contacts"))
+	}
+	if founder.For("tasks") != def.For("tasks") {
+		t.Errorf("omitted max_tasks not backfilled: got %d, want %d", founder.For("tasks"), def.For("tasks"))
+	}
+	if founder.For("tasks") <= 0 {
+		t.Errorf("backfilled tasks limit must not be a 0/none cap: got %d", founder.For("tasks"))
+	}
+	// Explicit -1 (unlimited) survives backfill.
+	if got := cfg.Plans.LimitsFor("loose").For("tasks"); got != -1 {
+		t.Errorf("explicit -1 (unlimited) overwritten by backfill: got %d", got)
+	}
+	// Explicit 0 (none allowed) is honored, not treated as unset.
+	if got := cfg.Plans.LimitsFor("strict").For("tasks"); got != 0 {
+		t.Errorf("explicit 0 (none) overwritten by backfill: got %d, want 0", got)
 	}
 }
 
