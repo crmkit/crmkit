@@ -57,6 +57,9 @@ opportunities, and follow-up work in one shared system:
   time.
 - **Fundraising** - manage investors, intros, conversations, diligence status,
   commitments, and follow-up tasks across a raise.
+- **Events & conferences** - track the conferences, trade shows, and webinars you
+  work, the contacts and companies you meet at each, and the follow-up tasks and
+  deals that come out of them.
 
 **Example:** ChatBotKit's [AI Market Bot](https://chatbotkit.com/examples/ai-market-bot)
 - a market-research and competitive-intelligence agent - is the market-monitoring
@@ -239,3 +242,7 @@ make build    # static binaries
 
 Releasing (version bump → tagged multi-platform build) is documented in
 [RELEASES.md](RELEASES.md).
+
+## Related
+
+- [zot](https://github.com/openzot/openzot) - an autonomous coding agent you don't babysit.
