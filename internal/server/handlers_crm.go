@@ -152,13 +152,13 @@ func (s *Server) handleListContacts(w http.ResponseWriter, r *http.Request) {
 		s.writeQueryError(w, r, err)
 		return
 	}
-	list, next, err := s.store.QueryContacts(sess.WorkspaceID, q)
+	list, total, next, err := s.store.QueryContacts(sess.WorkspaceID, q)
 	if err != nil {
 		s.serverErr(w, r)
 		return
 	}
 	list = localizedSlice(list, locationOf(sess))
-	s.respondList(w, r, list, render.Contacts(list), next)
+	s.respondList(w, r, list, render.Contacts(list), &total, next)
 }
 
 // handleCreateContact creates a contact, or - when an email is supplied that
@@ -338,7 +338,7 @@ func (s *Server) handleListContactActivities(w http.ResponseWriter, r *http.Requ
 	}
 	// Enveloped like the paginated lists for a uniform shape; no cursor here.
 	list = localizedSlice(list, locationOf(sess))
-	s.respondList(w, r, list, render.Activities(list), "")
+	s.respondList(w, r, list, render.Activities(list), nil, "")
 }
 
 func (s *Server) handleCreateContactActivity(w http.ResponseWriter, r *http.Request) {
@@ -383,7 +383,7 @@ func (s *Server) handleListCompanyActivities(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	list = localizedSlice(list, locationOf(sess))
-	s.respondList(w, r, list, render.Activities(list), "")
+	s.respondList(w, r, list, render.Activities(list), nil, "")
 }
 
 func (s *Server) handleCreateCompanyActivity(w http.ResponseWriter, r *http.Request) {
@@ -425,13 +425,13 @@ func (s *Server) handleListCompanies(w http.ResponseWriter, r *http.Request) {
 		s.writeQueryError(w, r, err)
 		return
 	}
-	list, next, err := s.store.QueryCompanies(sess.WorkspaceID, q)
+	list, total, next, err := s.store.QueryCompanies(sess.WorkspaceID, q)
 	if err != nil {
 		s.serverErr(w, r)
 		return
 	}
 	list = localizedSlice(list, locationOf(sess))
-	s.respondList(w, r, list, render.Companies(list), next)
+	s.respondList(w, r, list, render.Companies(list), &total, next)
 }
 
 // handleCreateCompany creates a company, or - when a domain is supplied that
@@ -597,13 +597,13 @@ func (s *Server) handleListDeals(w http.ResponseWriter, r *http.Request) {
 		s.writeQueryError(w, r, err)
 		return
 	}
-	list, next, err := s.store.QueryDeals(sess.WorkspaceID, q)
+	list, total, next, err := s.store.QueryDeals(sess.WorkspaceID, q)
 	if err != nil {
 		s.serverErr(w, r)
 		return
 	}
 	list = localizedSlice(list, locationOf(sess))
-	s.respondList(w, r, list, render.Deals(list), next)
+	s.respondList(w, r, list, render.Deals(list), &total, next)
 }
 
 func (s *Server) handleCreateDeal(w http.ResponseWriter, r *http.Request) {
@@ -735,13 +735,13 @@ func (s *Server) handleListTickets(w http.ResponseWriter, r *http.Request) {
 		s.writeQueryError(w, r, err)
 		return
 	}
-	list, next, err := s.store.QueryTickets(sess.WorkspaceID, q)
+	list, total, next, err := s.store.QueryTickets(sess.WorkspaceID, q)
 	if err != nil {
 		s.serverErr(w, r)
 		return
 	}
 	list = localizedSlice(list, locationOf(sess))
-	s.respondList(w, r, list, render.Tickets(list), next)
+	s.respondList(w, r, list, render.Tickets(list), &total, next)
 }
 
 func (s *Server) handleCreateTicket(w http.ResponseWriter, r *http.Request) {
@@ -815,7 +815,7 @@ func (s *Server) handleListTicketActivities(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	list = localizedSlice(list, locationOf(sess))
-	s.respondList(w, r, list, render.Activities(list), "")
+	s.respondList(w, r, list, render.Activities(list), nil, "")
 }
 
 func (s *Server) handleCreateTicketActivity(w http.ResponseWriter, r *http.Request) {
@@ -944,13 +944,13 @@ func (s *Server) handleListTasks(w http.ResponseWriter, r *http.Request) {
 		s.writeQueryError(w, r, err)
 		return
 	}
-	list, next, err := s.store.QueryTasks(sess.WorkspaceID, q)
+	list, total, next, err := s.store.QueryTasks(sess.WorkspaceID, q)
 	if err != nil {
 		s.serverErr(w, r)
 		return
 	}
 	list = localizedSlice(list, locationOf(sess))
-	s.respondList(w, r, list, render.Tasks(list), next)
+	s.respondList(w, r, list, render.Tasks(list), &total, next)
 }
 
 func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
@@ -1075,7 +1075,7 @@ func (s *Server) handleListReminders(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	list = localizedSlice(list, locationOf(sess))
-	s.respondList(w, r, list, render.Reminders(list), "")
+	s.respondList(w, r, list, render.Reminders(list), nil, "")
 }
 
 // ---- activities & audit --------------------------------------------------
@@ -1094,7 +1094,7 @@ func (s *Server) handleListActivities(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	list = localizedSlice(list, locationOf(sess))
-	s.respondList(w, r, list, render.Activities(list), "")
+	s.respondList(w, r, list, render.Activities(list), nil, "")
 }
 
 // handleDeleteActivity removes one activity. Unlike contacts/companies/deals it
@@ -1139,5 +1139,5 @@ func (s *Server) handleListAudit(w http.ResponseWriter, r *http.Request) {
 		lines.WriteByte('\n')
 	}
 	fmt.Fprintf(&lines, "# %d audit entry(ies)", len(list))
-	s.respondList(w, r, list, lines.String(), "")
+	s.respondList(w, r, list, lines.String(), nil, "")
 }

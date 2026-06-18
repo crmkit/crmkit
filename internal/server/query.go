@@ -1,6 +1,7 @@
 package server
 
 import (
+	"fmt"
 	"net/http"
 	"regexp"
 	"sort"
@@ -259,13 +260,20 @@ func (s *Server) writeQueryError(w http.ResponseWriter, r *http.Request, err err
 	render.Error(w, r, http.StatusBadRequest, "bad_request", err.Error())
 }
 
-// respondList writes a paginated list: plain-text lines + a "# next:" cursor
-// trailer, or JSON {items, next_cursor}.
-func (s *Server) respondList(w http.ResponseWriter, r *http.Request, items any, text, next string) {
+// respondList writes a paginated list: plain-text lines + "# total:"/"# next:"
+// trailers, or JSON {items, total, next_cursor}. total is the count of rows
+// matching the query's filters (independent of the page); pass nil for envelope
+// lists that aren't keyset-paginated, where it's omitted entirely.
+func (s *Server) respondList(w http.ResponseWriter, r *http.Request, items any, text string, total *int, next string) {
+	body := map[string]any{"items": items, "next_cursor": next}
+	if total != nil {
+		body["total"] = *total
+		text += fmt.Sprintf("\n# total: %d", *total)
+	}
 	if next != "" {
 		text += "\n# next: " + next
 	}
-	render.Respond(w, r, http.StatusOK, map[string]any{"items": items, "next_cursor": next}, text)
+	render.Respond(w, r, http.StatusOK, body, text)
 }
 
 // ---- per-entity whitelists -----------------------------------------------

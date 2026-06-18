@@ -74,6 +74,7 @@ Shortcut: POST /contacts?campaign=campaign_..&reason=.. (and /companies) creates
 Workflow: open a campaign, then upsert contacts/companies straight into it via ?campaign=. Re-check GET /campaigns/{id} for progress; the same entity can be in several campaigns.
 
 List filters: ?field=value or ?field=op:value (ops: eq ne gt gte lt lte like in is not), plus &search= &sort=-field &limit= &cursor= .
+Lists end with "# total: N" (rows matching your filters, across all pages) and, when more remain, "# next: <cursor>" to pass as &cursor=. Use total to decide whether to keep paging or narrow your filters.
 DELETE is two-step: the first call returns a confirm token to resend as ?confirm=. Errors are instructive - they tell you what to do next.
 
 Fetch the full manual any time: request GET /help`

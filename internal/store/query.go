@@ -81,14 +81,15 @@ func (q Query) effectiveSort() (col string, desc, numeric bool) {
 	return q.SortColumn, q.SortDesc, q.SortNumeric
 }
 
-// buildListSQL assembles the SELECT for a query. Identifiers (table, columns,
-// filter columns, operators) are caller-whitelisted; every user value is a
-// bound "?" parameter. It fetches Limit+1 rows so the caller can tell whether a
-// next page exists.
-func (s *sqlStore) buildListSQL(table, columns, ws string, q Query) (string, []any) {
+// buildWhere assembles the WHERE clause shared by a query's page and its total
+// count: workspace scope, the AND-ed filters, and the fuzzy search. Identifiers
+// (filter columns, operators) are caller-whitelisted; every user value is a
+// bound "?" parameter. It deliberately omits the keyset cursor (a pagination
+// position, not a result filter), the sort, and the limit.
+func (s *sqlStore) buildWhere(ws string, q Query) (string, []any) {
 	args := []any{ws}
 	var sb strings.Builder
-	sb.WriteString("SELECT " + columns + " FROM " + table + " WHERE workspace_id = ?")
+	sb.WriteString(" WHERE workspace_id = ?")
 
 	for _, f := range q.Filters {
 		// A JSON-key filter compares a key inside the JSON column as text. The key
@@ -132,6 +133,17 @@ func (s *sqlStore) buildListSQL(table, columns, ws string, q Query) (string, []a
 		fmt.Fprintf(&sb, " AND (%s)", strings.Join(parts, " OR "))
 	}
 
+	return sb.String(), args
+}
+
+// buildListSQL assembles the SELECT for a query's page. It fetches Limit+1 rows
+// so the caller can tell whether a next page exists.
+func (s *sqlStore) buildListSQL(table, columns, ws string, q Query) (string, []any) {
+	where, args := s.buildWhere(ws, q)
+	var sb strings.Builder
+	sb.WriteString("SELECT " + columns + " FROM " + table)
+	sb.WriteString(where)
+
 	col, desc, numeric := q.effectiveSort()
 	cmp := ">"
 	dir := "ASC"
@@ -158,27 +170,37 @@ func (q Query) nextCursor(valStr, id string) string {
 	return encodeCursor(Cursor{Col: col, Desc: desc, Num: num, Val: valStr, ID: id})
 }
 
-// QueryContacts runs a validated query and returns the page plus a next-cursor
-// (empty when there are no more rows).
-func (s *sqlStore) QueryContacts(ws string, q Query) ([]protocol.Contact, string, error) {
+// countMatching returns the total number of rows matching the query's filters
+// and search (workspace-scoped), independent of the page or cursor. It's a
+// COUNT(*) over the same WHERE clause as the list, giving callers a "X of N"
+// hint alongside keyset pagination.
+func (s *sqlStore) countMatching(table, ws string, q Query) (int, error) {
+	where, args := s.buildWhere(ws, q)
+	return s.countWhere("SELECT COUNT(*) FROM "+table+where, args...)
+}
+
+// QueryContacts runs a validated query and returns the page, the total number
+// of rows matching the filters, and a next-cursor (empty when there are no more
+// rows).
+func (s *sqlStore) QueryContacts(ws string, q Query) ([]protocol.Contact, int, string, error) {
 	sqlStr, args := s.buildListSQL("contacts", contactColumns, ws, q)
 	rows, err := s.query(sqlStr, args...)
 	if err != nil {
-		return nil, "", err
+		return nil, 0, "", err
 	}
 	out := []protocol.Contact{} // non-nil so an empty list serializes as [] not null
 	for rows.Next() {
 		c, err := scanContact(rows)
 		if err != nil {
 			rows.Close()
-			return nil, "", err
+			return nil, 0, "", err
 		}
 		out = append(out, c)
 	}
 	err = rows.Err()
 	rows.Close() // close before the relation-resolution query (single-connection safety)
 	if err != nil {
-		return nil, "", err
+		return nil, 0, "", err
 	}
 	next := ""
 	if len(out) > q.Limit {
@@ -187,30 +209,36 @@ func (s *sqlStore) QueryContacts(ws string, q Query) ([]protocol.Contact, string
 		col, _, _ := q.effectiveSort()
 		next = q.nextCursor(contactSortVal(last, col), last.ID)
 	}
-	if err := s.fillContactRefs(ws, out); err != nil {
-		return nil, "", err
+	total, err := s.countMatching("contacts", ws, q)
+	if err != nil {
+		return nil, 0, "", err
 	}
-	return out, next, nil
+	if err := s.fillContactRefs(ws, out); err != nil {
+		return nil, 0, "", err
+	}
+	return out, total, next, nil
 }
 
 // QueryCompanies runs a validated query over companies.
-func (s *sqlStore) QueryCompanies(ws string, q Query) ([]protocol.Company, string, error) {
+func (s *sqlStore) QueryCompanies(ws string, q Query) ([]protocol.Company, int, string, error) {
 	sqlStr, args := s.buildListSQL("companies", companyColumns, ws, q)
 	rows, err := s.query(sqlStr, args...)
 	if err != nil {
-		return nil, "", err
+		return nil, 0, "", err
 	}
-	defer rows.Close()
 	out := []protocol.Company{}
 	for rows.Next() {
 		c, err := scanCompany(rows)
 		if err != nil {
-			return nil, "", err
+			rows.Close()
+			return nil, 0, "", err
 		}
 		out = append(out, c)
 	}
-	if err := rows.Err(); err != nil {
-		return nil, "", err
+	err = rows.Err()
+	rows.Close() // close before the count query (single-connection safety)
+	if err != nil {
+		return nil, 0, "", err
 	}
 	next := ""
 	if len(out) > q.Limit {
@@ -219,29 +247,33 @@ func (s *sqlStore) QueryCompanies(ws string, q Query) ([]protocol.Company, strin
 		col, _, _ := q.effectiveSort()
 		next = q.nextCursor(companySortVal(last, col), last.ID)
 	}
-	return out, next, nil
+	total, err := s.countMatching("companies", ws, q)
+	if err != nil {
+		return nil, 0, "", err
+	}
+	return out, total, next, nil
 }
 
 // QueryDeals runs a validated query over deals.
-func (s *sqlStore) QueryDeals(ws string, q Query) ([]protocol.Deal, string, error) {
+func (s *sqlStore) QueryDeals(ws string, q Query) ([]protocol.Deal, int, string, error) {
 	sqlStr, args := s.buildListSQL("deals", dealColumns, ws, q)
 	rows, err := s.query(sqlStr, args...)
 	if err != nil {
-		return nil, "", err
+		return nil, 0, "", err
 	}
 	out := []protocol.Deal{}
 	for rows.Next() {
 		d, err := scanDeal(rows)
 		if err != nil {
 			rows.Close()
-			return nil, "", err
+			return nil, 0, "", err
 		}
 		out = append(out, d)
 	}
 	err = rows.Err()
 	rows.Close() // close before the relation-resolution query (single-connection safety)
 	if err != nil {
-		return nil, "", err
+		return nil, 0, "", err
 	}
 	next := ""
 	if len(out) > q.Limit {
@@ -250,32 +282,36 @@ func (s *sqlStore) QueryDeals(ws string, q Query) ([]protocol.Deal, string, erro
 		col, _, _ := q.effectiveSort()
 		next = q.nextCursor(dealSortVal(last, col), last.ID)
 	}
-	if err := s.fillDealRefs(ws, out); err != nil {
-		return nil, "", err
+	total, err := s.countMatching("deals", ws, q)
+	if err != nil {
+		return nil, 0, "", err
 	}
-	return out, next, nil
+	if err := s.fillDealRefs(ws, out); err != nil {
+		return nil, 0, "", err
+	}
+	return out, total, next, nil
 }
 
 // QueryTickets runs a validated query over tickets.
-func (s *sqlStore) QueryTickets(ws string, q Query) ([]protocol.Ticket, string, error) {
+func (s *sqlStore) QueryTickets(ws string, q Query) ([]protocol.Ticket, int, string, error) {
 	sqlStr, args := s.buildListSQL("tickets", ticketColumns, ws, q)
 	rows, err := s.query(sqlStr, args...)
 	if err != nil {
-		return nil, "", err
+		return nil, 0, "", err
 	}
 	out := []protocol.Ticket{}
 	for rows.Next() {
 		t, err := scanTicket(rows)
 		if err != nil {
 			rows.Close()
-			return nil, "", err
+			return nil, 0, "", err
 		}
 		out = append(out, t)
 	}
 	err = rows.Err()
 	rows.Close() // close before the relation-resolution query (single-connection safety)
 	if err != nil {
-		return nil, "", err
+		return nil, 0, "", err
 	}
 	next := ""
 	if len(out) > q.Limit {
@@ -284,32 +320,36 @@ func (s *sqlStore) QueryTickets(ws string, q Query) ([]protocol.Ticket, string, 
 		col, _, _ := q.effectiveSort()
 		next = q.nextCursor(ticketSortVal(last, col), last.ID)
 	}
-	if err := s.fillTicketRefs(ws, out); err != nil {
-		return nil, "", err
+	total, err := s.countMatching("tickets", ws, q)
+	if err != nil {
+		return nil, 0, "", err
 	}
-	return out, next, nil
+	if err := s.fillTicketRefs(ws, out); err != nil {
+		return nil, 0, "", err
+	}
+	return out, total, next, nil
 }
 
 // QueryTasks runs a validated query over tasks.
-func (s *sqlStore) QueryTasks(ws string, q Query) ([]protocol.Task, string, error) {
+func (s *sqlStore) QueryTasks(ws string, q Query) ([]protocol.Task, int, string, error) {
 	sqlStr, args := s.buildListSQL("tasks", taskColumns, ws, q)
 	rows, err := s.query(sqlStr, args...)
 	if err != nil {
-		return nil, "", err
+		return nil, 0, "", err
 	}
 	out := []protocol.Task{}
 	for rows.Next() {
 		t, err := scanTask(rows)
 		if err != nil {
 			rows.Close()
-			return nil, "", err
+			return nil, 0, "", err
 		}
 		out = append(out, t)
 	}
 	err = rows.Err()
 	rows.Close() // close before the relation-resolution query (single-connection safety)
 	if err != nil {
-		return nil, "", err
+		return nil, 0, "", err
 	}
 	next := ""
 	if len(out) > q.Limit {
@@ -318,32 +358,36 @@ func (s *sqlStore) QueryTasks(ws string, q Query) ([]protocol.Task, string, erro
 		col, _, _ := q.effectiveSort()
 		next = q.nextCursor(taskSortVal(last, col), last.ID)
 	}
-	if err := s.fillTaskRefs(ws, out); err != nil {
-		return nil, "", err
+	total, err := s.countMatching("tasks", ws, q)
+	if err != nil {
+		return nil, 0, "", err
 	}
-	return out, next, nil
+	if err := s.fillTaskRefs(ws, out); err != nil {
+		return nil, 0, "", err
+	}
+	return out, total, next, nil
 }
 
 // QueryCampaigns runs a validated query over campaigns.
-func (s *sqlStore) QueryCampaigns(ws string, q Query) ([]protocol.Campaign, string, error) {
+func (s *sqlStore) QueryCampaigns(ws string, q Query) ([]protocol.Campaign, int, string, error) {
 	sqlStr, args := s.buildListSQL("campaigns", campaignColumns, ws, q)
 	rows, err := s.query(sqlStr, args...)
 	if err != nil {
-		return nil, "", err
+		return nil, 0, "", err
 	}
 	out := []protocol.Campaign{}
 	for rows.Next() {
 		c, err := scanCampaign(rows)
 		if err != nil {
 			rows.Close()
-			return nil, "", err
+			return nil, 0, "", err
 		}
 		out = append(out, c)
 	}
 	err = rows.Err()
-	rows.Close()
+	rows.Close() // close before the count query (single-connection safety)
 	if err != nil {
-		return nil, "", err
+		return nil, 0, "", err
 	}
 	next := ""
 	if len(out) > q.Limit {
@@ -352,7 +396,11 @@ func (s *sqlStore) QueryCampaigns(ws string, q Query) ([]protocol.Campaign, stri
 		col, _, _ := q.effectiveSort()
 		next = q.nextCursor(campaignSortVal(last, col), last.ID)
 	}
-	return out, next, nil
+	total, err := s.countMatching("campaigns", ws, q)
+	if err != nil {
+		return nil, 0, "", err
+	}
+	return out, total, next, nil
 }
 
 func campaignSortVal(c protocol.Campaign, col string) string {
