@@ -312,9 +312,18 @@ func TestJSONNegotiation(t *testing.T) {
 	}
 	var page struct {
 		Items      []any  `json:"items"`
+		Total      *int   `json:"total"`
 		NextCursor string `json:"next_cursor"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&page); err != nil {
-		t.Fatalf("expected json {items,next_cursor}, got error %v", err)
+		t.Fatalf("expected json {items,total,next_cursor}, got error %v", err)
+	}
+	// A paginated list reports its total; with a single page it equals the count
+	// of returned rows.
+	if page.Total == nil {
+		t.Fatalf("expected a total in the list response, got none")
+	}
+	if page.NextCursor == "" && *page.Total != len(page.Items) {
+		t.Fatalf("single-page total %d != items %d", *page.Total, len(page.Items))
 	}
 }

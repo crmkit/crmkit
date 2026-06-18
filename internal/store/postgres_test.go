@@ -87,7 +87,7 @@ func TestPostgresEndToEnd(t *testing.T) {
 		t.Fatalf("create contact: %v", err)
 	}
 	// lowercase search vs mixed-case data exercises ILIKE on Postgres.
-	found, _, err := st.QueryContacts(team, Query{Search: "acme", SearchColumns: []string{"name", "email"}, SortColumn: "updated_at", SortDesc: true, SortNumeric: true, Limit: 10})
+	found, _, _, err := st.QueryContacts(team, Query{Search: "acme", SearchColumns: []string{"name", "email"}, SortColumn: "updated_at", SortDesc: true, SortNumeric: true, Limit: 10})
 	if err != nil || len(found) != 1 {
 		t.Fatalf("ILIKE search failed: err=%v n=%d", err, len(found))
 	}
@@ -106,7 +106,7 @@ func TestPostgresEndToEnd(t *testing.T) {
 
 	// Deals + pipeline filter.
 	_ = st.CreateDeal(team, &protocol.Deal{Title: "Acme renewal", Stage: "proposal", AmountCents: 500000, Currency: "USD", ContactID: c.ID})
-	open, _, err := st.QueryDeals(team, Query{
+	open, _, _, err := st.QueryDeals(team, Query{
 		Filters:    []QFilter{{Column: "status", Op: "=", Value: "open"}, {Column: "amount_cents", Op: ">=", Value: int64(100000)}},
 		SortColumn: "amount_cents", SortDesc: true, SortNumeric: true, Limit: 10,
 	})

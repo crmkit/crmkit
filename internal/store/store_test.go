@@ -249,9 +249,12 @@ func TestContactCRUDAndIsolation(t *testing.T) {
 	}
 
 	// Search via the query layer.
-	list, _, err := st.QueryContacts(wsA, Query{Search: "acme", SearchColumns: []string{"name", "email"}, SortColumn: "updated_at", SortDesc: true, SortNumeric: true, Limit: 10})
+	list, total, _, err := st.QueryContacts(wsA, Query{Search: "acme", SearchColumns: []string{"name", "email"}, SortColumn: "updated_at", SortDesc: true, SortNumeric: true, Limit: 10})
 	if err != nil || len(list) != 1 {
 		t.Fatalf("search: err=%v n=%d", err, len(list))
+	}
+	if total != 1 {
+		t.Fatalf("search total: want 1, got %d", total)
 	}
 
 	// Update.
@@ -381,7 +384,7 @@ func TestRelationNameResolution(t *testing.T) {
 	}
 
 	// List read resolves the company name for every row in one shot.
-	contacts, _, err := st.QueryContacts(ws, Query{SortColumn: "updated_at", SortDesc: true, SortNumeric: true, Limit: 10})
+	contacts, _, _, err := st.QueryContacts(ws, Query{SortColumn: "updated_at", SortDesc: true, SortNumeric: true, Limit: 10})
 	if err != nil {
 		t.Fatalf("query contacts: %v", err)
 	}
@@ -404,7 +407,7 @@ func TestRelationNameResolution(t *testing.T) {
 	if gotD.ContactName != "Jane Doe" || gotD.CompanyName != "ACME" {
 		t.Fatalf("get deal resolution: contact=%q company=%q", gotD.ContactName, gotD.CompanyName)
 	}
-	deals, _, err := st.QueryDeals(ws, Query{SortColumn: "updated_at", SortDesc: true, SortNumeric: true, Limit: 10})
+	deals, _, _, err := st.QueryDeals(ws, Query{SortColumn: "updated_at", SortDesc: true, SortNumeric: true, Limit: 10})
 	if err != nil {
 		t.Fatalf("query deals: %v", err)
 	}
@@ -435,16 +438,20 @@ func TestDealFilters(t *testing.T) {
 		Filters:    []QFilter{{Column: "status", Op: "=", Value: "open"}},
 		SortColumn: "updated_at", SortDesc: true, SortNumeric: true, Limit: 10,
 	}
-	open, _, err := st.QueryDeals(ws, q)
+	open, openTotal, _, err := st.QueryDeals(ws, q)
 	if err != nil {
 		t.Fatalf("query deals: %v", err)
 	}
 	if len(open) != 1 || open[0].Title != "Open one" {
 		t.Fatalf("status filter failed: %+v", open)
 	}
+	// The total counts only rows matching the filter, not the whole workspace.
+	if openTotal != 1 {
+		t.Fatalf("filtered total: want 1, got %d", openTotal)
+	}
 
 	// amount filter via gte.
-	big, _, _ := st.QueryDeals(ws, Query{
+	big, _, _, _ := st.QueryDeals(ws, Query{
 		Filters:    []QFilter{{Column: "amount_cents", Op: ">=", Value: int64(2000)}},
 		SortColumn: "updated_at", SortDesc: true, SortNumeric: true, Limit: 10,
 	})

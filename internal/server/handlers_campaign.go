@@ -33,13 +33,13 @@ func (s *Server) handleListCampaigns(w http.ResponseWriter, r *http.Request) {
 		s.writeQueryError(w, r, err)
 		return
 	}
-	list, next, err := s.store.QueryCampaigns(sess.WorkspaceID, q)
+	list, total, next, err := s.store.QueryCampaigns(sess.WorkspaceID, q)
 	if err != nil {
 		s.serverErr(w, r)
 		return
 	}
 	list = localizedSlice(list, locationOf(sess))
-	s.respondList(w, r, list, render.Campaigns(list), next)
+	s.respondList(w, r, list, render.Campaigns(list), &total, next)
 }
 
 func (s *Server) handleCreateCampaign(w http.ResponseWriter, r *http.Request) {
@@ -204,7 +204,7 @@ func (s *Server) handleListCampaignMembers(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	list = localizedSlice(list, locationOf(sess))
-	s.respondList(w, r, list, render.CampaignMembers(list), "")
+	s.respondList(w, r, list, render.CampaignMembers(list), nil, "")
 }
 
 // campaignMemberRequest is the body of POST /campaigns/{id}/members: an entity

@@ -2,6 +2,12 @@
 
 All notable changes to crmkit, following [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
+## [0.6.0] - 2026-06-18
+
+### Features
+
+- List endpoints (`/contacts`, `/companies`, `/deals`, `/tickets`, `/tasks`, `/campaigns`) now report the total number of records matching the query across all pages, not just the current page. Keyset pagination still drives navigation; the total is an extra hint so a caller (or agent) can tell how much is there and decide whether to keep paging or narrow its filters. It honours the same filters and `search` as the list and is exposed as a `total` field in JSON responses and a `# total: N` trailer in the grepable text format, alongside the existing `# next:` cursor.
+
 ## [0.5.1] - 2026-06-13
 
 ### Fixed

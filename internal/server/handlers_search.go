@@ -36,7 +36,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	tickets := []protocol.Ticket{}
 
 	if want["contacts"] {
-		list, _, err := s.store.QueryContacts(sess.WorkspaceID, searchQuery(contactQuery, term))
+		list, _, _, err := s.store.QueryContacts(sess.WorkspaceID, searchQuery(contactQuery, term))
 		if err != nil {
 			s.serverErr(w, r)
 			return
@@ -44,7 +44,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		contacts = list
 	}
 	if want["companies"] {
-		list, _, err := s.store.QueryCompanies(sess.WorkspaceID, searchQuery(companyQuery, term))
+		list, _, _, err := s.store.QueryCompanies(sess.WorkspaceID, searchQuery(companyQuery, term))
 		if err != nil {
 			s.serverErr(w, r)
 			return
@@ -52,7 +52,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		companies = list
 	}
 	if want["deals"] {
-		list, _, err := s.store.QueryDeals(sess.WorkspaceID, searchQuery(dealQuery, term))
+		list, _, _, err := s.store.QueryDeals(sess.WorkspaceID, searchQuery(dealQuery, term))
 		if err != nil {
 			s.serverErr(w, r)
 			return
@@ -60,7 +60,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		deals = list
 	}
 	if want["tickets"] {
-		list, _, err := s.store.QueryTickets(sess.WorkspaceID, searchQuery(ticketQuery, term))
+		list, _, _, err := s.store.QueryTickets(sess.WorkspaceID, searchQuery(ticketQuery, term))
 		if err != nil {
 			s.serverErr(w, r)
 			return

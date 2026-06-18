@@ -102,7 +102,7 @@ type Store interface {
 	// contacts
 	CreateContact(ws string, c *protocol.Contact) error
 	GetContact(ws, id string) (protocol.Contact, error)
-	QueryContacts(ws string, q Query) ([]protocol.Contact, string, error)
+	QueryContacts(ws string, q Query) ([]protocol.Contact, int, string, error)
 	FindContactByEmail(ws, email string) ([]protocol.Contact, error)
 	UpdateContact(ws string, c *protocol.Contact, ifMatch int64) error
 	DeleteContact(ws, id string) error
@@ -110,7 +110,7 @@ type Store interface {
 	// companies
 	CreateCompany(ws string, c *protocol.Company) error
 	GetCompany(ws, id string) (protocol.Company, error)
-	QueryCompanies(ws string, q Query) ([]protocol.Company, string, error)
+	QueryCompanies(ws string, q Query) ([]protocol.Company, int, string, error)
 	FindCompanyByDomain(ws, domain string) ([]protocol.Company, error)
 	UpdateCompany(ws string, c *protocol.Company, ifMatch int64) error
 	DeleteCompany(ws, id string) error
@@ -118,14 +118,14 @@ type Store interface {
 	// deals
 	CreateDeal(ws string, d *protocol.Deal) error
 	GetDeal(ws, id string) (protocol.Deal, error)
-	QueryDeals(ws string, q Query) ([]protocol.Deal, string, error)
+	QueryDeals(ws string, q Query) ([]protocol.Deal, int, string, error)
 	UpdateDeal(ws string, d *protocol.Deal, ifMatch int64) error
 	DeleteDeal(ws, id string) error
 
 	// tickets
 	CreateTicket(ws string, t *protocol.Ticket) error
 	GetTicket(ws, id string) (protocol.Ticket, error)
-	QueryTickets(ws string, q Query) ([]protocol.Ticket, string, error)
+	QueryTickets(ws string, q Query) ([]protocol.Ticket, int, string, error)
 	UpdateTicket(ws string, t *protocol.Ticket, ifMatch int64) error
 	DeleteTicket(ws, id string) error
 
@@ -133,7 +133,7 @@ type Store interface {
 	// contact/company/deal/ticket. Supersedes the per-record follow_up slot.
 	CreateTask(ws string, t *protocol.Task) error
 	GetTask(ws, id string) (protocol.Task, error)
-	QueryTasks(ws string, q Query) ([]protocol.Task, string, error)
+	QueryTasks(ws string, q Query) ([]protocol.Task, int, string, error)
 	UpdateTask(ws string, t *protocol.Task, ifMatch int64) error
 	DeleteTask(ws, id string) error
 
@@ -141,7 +141,7 @@ type Store interface {
 	// many-to-many and deduped per campaign; AttachMember is idempotent.
 	CreateCampaign(ws string, c *protocol.Campaign) error
 	GetCampaign(ws, id string) (protocol.Campaign, error)
-	QueryCampaigns(ws string, q Query) ([]protocol.Campaign, string, error)
+	QueryCampaigns(ws string, q Query) ([]protocol.Campaign, int, string, error)
 	UpdateCampaign(ws string, c *protocol.Campaign, ifMatch int64) error
 	DeleteCampaign(ws, id string) error
 	AttachCampaignMember(ws, campaignID, kind, entityID, reason, addedBy string) error
