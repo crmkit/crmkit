@@ -829,31 +829,33 @@ func (s *sqlStore) DeleteActivity(ws, id string) error {
 	return affectedOne(res)
 }
 
-// ListActivities returns activities for a workspace, optionally filtered by
-// contact, deal, company, or ticket, newest first.
-func (s *sqlStore) ListActivities(ws, contactID, dealID, companyID, ticketID string, limit int) ([]protocol.Activity, error) {
+// ListActivities returns activities for a workspace, newest first, optionally
+// filtered by contact, deal, company, and/or ticket. Each filter takes a set of
+// ids and matches any of them (col IN (...)), so a caller can pull the timeline
+// for one record or for a whole list of them - e.g. every company on a page - in
+// one call. A nil/empty set drops that filter.
+func (s *sqlStore) ListActivities(ws string, contactIDs, dealIDs, companyIDs, ticketIDs []string, limit int) ([]protocol.Activity, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 50
 	}
 	args := []any{ws}
 	sb := strings.Builder{}
 	sb.WriteString(`SELECT id, handle, contact_id, deal_id, company_id, ticket_id, kind, body, created_by, created_at FROM activities WHERE workspace_id = ?`)
-	if contactID != "" {
-		sb.WriteString(` AND contact_id = ?`)
-		args = append(args, contactID)
+	addIn := func(col string, ids []string) {
+		ids = distinctNonEmpty(ids)
+		if len(ids) == 0 {
+			return
+		}
+		ph := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
+		sb.WriteString(" AND " + col + " IN (" + ph + ")")
+		for _, id := range ids {
+			args = append(args, id)
+		}
 	}
-	if dealID != "" {
-		sb.WriteString(` AND deal_id = ?`)
-		args = append(args, dealID)
-	}
-	if companyID != "" {
-		sb.WriteString(` AND company_id = ?`)
-		args = append(args, companyID)
-	}
-	if ticketID != "" {
-		sb.WriteString(` AND ticket_id = ?`)
-		args = append(args, ticketID)
-	}
+	addIn("contact_id", contactIDs)
+	addIn("deal_id", dealIDs)
+	addIn("company_id", companyIDs)
+	addIn("ticket_id", ticketIDs)
 	sb.WriteString(` ORDER BY created_at DESC LIMIT ?`)
 	args = append(args, limit)
 
@@ -920,6 +922,70 @@ func (s *sqlStore) ActivityStats(ws, contactID, dealID, companyID, ticketID stri
 		return count, time.Time{}, nil
 	}
 	return count, fromUnix(last), nil
+}
+
+// ActivityStat is a per-record activity summary: how many activities reference a
+// record and when the most recent was logged (zero time when there are none).
+type ActivityStat struct {
+	Count int
+	Last  time.Time
+}
+
+// activityCol maps an entity kind to the activities column that references it.
+// The value is a code-controlled identifier (never user input), so concatenating
+// it into SQL is injection-safe - the same contract handlesByID relies on.
+var activityCol = map[string]string{
+	protocol.KindContact: "contact_id",
+	protocol.KindDeal:    "deal_id",
+	protocol.KindCompany: "company_id",
+	protocol.KindTicket:  "ticket_id",
+}
+
+// ActivityStatsBatch returns activity summaries for many records of one kind in a
+// single grouped query - the list-friendly counterpart to ActivityStats, so a
+// page of records can show activity without a query per row. kind selects the
+// column (contact|deal|company|ticket). The result is keyed by internal record id;
+// ids with no activity are absent (callers treat missing as zero). An unknown kind
+// or empty ids yields an empty map without querying.
+func (s *sqlStore) ActivityStatsBatch(ws, kind string, ids []string) (map[string]ActivityStat, error) {
+	out := map[string]ActivityStat{}
+	col, ok := activityCol[kind]
+	if !ok {
+		return out, nil
+	}
+	ids = distinctNonEmpty(ids)
+	if len(ids) == 0 {
+		return out, nil
+	}
+	ph := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
+	args := make([]any, 0, len(ids)+1)
+	args = append(args, ws)
+	for _, id := range ids {
+		args = append(args, id)
+	}
+	rows, err := s.query(
+		"SELECT "+col+", count(*), coalesce(max(created_at), 0) FROM activities WHERE workspace_id = ? AND "+col+" IN ("+ph+") GROUP BY "+col,
+		args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			id    string
+			count int
+			last  int64
+		)
+		if err := rows.Scan(&id, &count, &last); err != nil {
+			return nil, err
+		}
+		st := ActivityStat{Count: count}
+		if last != 0 {
+			st.Last = fromUnix(last)
+		}
+		out[id] = st
+	}
+	return out, rows.Err()
 }
 
 // ---- audit ---------------------------------------------------------------

@@ -77,6 +77,22 @@ func (s *Server) relationID(ws, kind, ref string) string {
 	return ref
 }
 
+// relationIDs resolves a comma-separated list of relation references (handles or
+// raw ids) to internal ids, dropping blanks. Powers multi-id activity filters like
+// ?company=company_a,company_b - "the activity for any of these records".
+func (s *Server) relationIDs(ws, kind, raw string) []string {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	var out []string
+	for _, ref := range strings.Split(raw, ",") {
+		if id := s.relationID(ws, kind, strings.TrimSpace(ref)); id != "" {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
 // auditKinds is the set of entity kinds whose audit targets can be filtered by
 // a record reference.
 var auditKinds = map[string]bool{
@@ -143,6 +159,107 @@ func (s *Server) writeUpdateErr(w http.ResponseWriter, r *http.Request, kind str
 	return true
 }
 
+// ---- list activity annotation --------------------------------------------
+
+// fillContactActivity annotates a contact page with each record's activity count
+// and most-recent activity time, in one batched query, so a list carries the same
+// activity signal a single GET shows. Best-effort: a stats hiccup leaves the
+// counts unset rather than failing the list (matching the single-record fetch).
+func (s *Server) fillContactActivity(ws string, list []protocol.Contact) {
+	if len(list) == 0 {
+		return
+	}
+	ids := make([]string, len(list))
+	for i := range list {
+		ids[i] = list[i].ID
+	}
+	stats, err := s.store.ActivityStatsBatch(ws, protocol.KindContact, ids)
+	if err != nil {
+		return
+	}
+	for i := range list {
+		if st, ok := stats[list[i].ID]; ok {
+			list[i].ActivityCount = st.Count
+			if !st.Last.IsZero() {
+				t := st.Last
+				list[i].LastActivityAt = &t
+			}
+		}
+	}
+}
+
+// fillCompanyActivity is fillContactActivity for a company page.
+func (s *Server) fillCompanyActivity(ws string, list []protocol.Company) {
+	if len(list) == 0 {
+		return
+	}
+	ids := make([]string, len(list))
+	for i := range list {
+		ids[i] = list[i].ID
+	}
+	stats, err := s.store.ActivityStatsBatch(ws, protocol.KindCompany, ids)
+	if err != nil {
+		return
+	}
+	for i := range list {
+		if st, ok := stats[list[i].ID]; ok {
+			list[i].ActivityCount = st.Count
+			if !st.Last.IsZero() {
+				t := st.Last
+				list[i].LastActivityAt = &t
+			}
+		}
+	}
+}
+
+// fillDealActivity is fillContactActivity for a deal page.
+func (s *Server) fillDealActivity(ws string, list []protocol.Deal) {
+	if len(list) == 0 {
+		return
+	}
+	ids := make([]string, len(list))
+	for i := range list {
+		ids[i] = list[i].ID
+	}
+	stats, err := s.store.ActivityStatsBatch(ws, protocol.KindDeal, ids)
+	if err != nil {
+		return
+	}
+	for i := range list {
+		if st, ok := stats[list[i].ID]; ok {
+			list[i].ActivityCount = st.Count
+			if !st.Last.IsZero() {
+				t := st.Last
+				list[i].LastActivityAt = &t
+			}
+		}
+	}
+}
+
+// fillTicketActivity is fillContactActivity for a ticket page (its conversation).
+func (s *Server) fillTicketActivity(ws string, list []protocol.Ticket) {
+	if len(list) == 0 {
+		return
+	}
+	ids := make([]string, len(list))
+	for i := range list {
+		ids[i] = list[i].ID
+	}
+	stats, err := s.store.ActivityStatsBatch(ws, protocol.KindTicket, ids)
+	if err != nil {
+		return
+	}
+	for i := range list {
+		if st, ok := stats[list[i].ID]; ok {
+			list[i].ActivityCount = st.Count
+			if !st.Last.IsZero() {
+				t := st.Last
+				list[i].LastActivityAt = &t
+			}
+		}
+	}
+}
+
 // ---- contacts ------------------------------------------------------------
 
 func (s *Server) handleListContacts(w http.ResponseWriter, r *http.Request) {
@@ -157,6 +274,7 @@ func (s *Server) handleListContacts(w http.ResponseWriter, r *http.Request) {
 		s.serverErr(w, r)
 		return
 	}
+	s.fillContactActivity(sess.WorkspaceID, list)
 	list = localizedSlice(list, locationOf(sess))
 	s.respondList(w, r, list, render.Contacts(list), &total, next)
 }
@@ -331,7 +449,7 @@ func (s *Server) handleListContactActivities(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	limit := render.Int(r.URL.Query().Get("limit"), 50)
-	list, err := s.store.ListActivities(sess.WorkspaceID, id, "", "", "", limit)
+	list, err := s.store.ListActivities(sess.WorkspaceID, []string{id}, nil, nil, nil, limit)
 	if err != nil {
 		s.serverErr(w, r)
 		return
@@ -377,7 +495,7 @@ func (s *Server) handleListCompanyActivities(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	limit := render.Int(r.URL.Query().Get("limit"), 50)
-	list, err := s.store.ListActivities(sess.WorkspaceID, "", "", id, "", limit)
+	list, err := s.store.ListActivities(sess.WorkspaceID, nil, nil, []string{id}, nil, limit)
 	if err != nil {
 		s.serverErr(w, r)
 		return
@@ -430,6 +548,7 @@ func (s *Server) handleListCompanies(w http.ResponseWriter, r *http.Request) {
 		s.serverErr(w, r)
 		return
 	}
+	s.fillCompanyActivity(sess.WorkspaceID, list)
 	list = localizedSlice(list, locationOf(sess))
 	s.respondList(w, r, list, render.Companies(list), &total, next)
 }
@@ -602,6 +721,7 @@ func (s *Server) handleListDeals(w http.ResponseWriter, r *http.Request) {
 		s.serverErr(w, r)
 		return
 	}
+	s.fillDealActivity(sess.WorkspaceID, list)
 	list = localizedSlice(list, locationOf(sess))
 	s.respondList(w, r, list, render.Deals(list), &total, next)
 }
@@ -740,6 +860,7 @@ func (s *Server) handleListTickets(w http.ResponseWriter, r *http.Request) {
 		s.serverErr(w, r)
 		return
 	}
+	s.fillTicketActivity(sess.WorkspaceID, list)
 	list = localizedSlice(list, locationOf(sess))
 	s.respondList(w, r, list, render.Tickets(list), &total, next)
 }
@@ -809,7 +930,7 @@ func (s *Server) handleListTicketActivities(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	limit := render.Int(r.URL.Query().Get("limit"), 50)
-	list, err := s.store.ListActivities(sess.WorkspaceID, "", "", "", id, limit)
+	list, err := s.store.ListActivities(sess.WorkspaceID, nil, nil, nil, []string{id}, limit)
 	if err != nil {
 		s.serverErr(w, r)
 		return
@@ -1083,12 +1204,14 @@ func (s *Server) handleListReminders(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleListActivities(w http.ResponseWriter, r *http.Request) {
 	sess := sessionFrom(r)
 	q := r.URL.Query()
-	// Filters accept a handle (or raw id); resolve each to the internal id.
-	contactID := s.relationID(sess.WorkspaceID, protocol.KindContact, q.Get("contact"))
-	dealID := s.relationID(sess.WorkspaceID, protocol.KindDeal, q.Get("deal"))
-	companyID := s.relationID(sess.WorkspaceID, protocol.KindCompany, q.Get("company"))
-	ticketID := s.relationID(sess.WorkspaceID, protocol.KindTicket, q.Get("ticket"))
-	list, err := s.store.ListActivities(sess.WorkspaceID, contactID, dealID, companyID, ticketID, render.Int(q.Get("limit"), 50))
+	// Filters accept one or more comma-separated handles (or raw ids); resolve each
+	// to an internal id. Passing several - e.g. ?company=company_a,company_b - pulls
+	// the activity for a whole set of records in one call (matches any of them).
+	contactIDs := s.relationIDs(sess.WorkspaceID, protocol.KindContact, q.Get("contact"))
+	dealIDs := s.relationIDs(sess.WorkspaceID, protocol.KindDeal, q.Get("deal"))
+	companyIDs := s.relationIDs(sess.WorkspaceID, protocol.KindCompany, q.Get("company"))
+	ticketIDs := s.relationIDs(sess.WorkspaceID, protocol.KindTicket, q.Get("ticket"))
+	list, err := s.store.ListActivities(sess.WorkspaceID, contactIDs, dealIDs, companyIDs, ticketIDs, render.Int(q.Get("limit"), 50))
 	if err != nil {
 		s.serverErr(w, r)
 		return
