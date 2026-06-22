@@ -168,6 +168,12 @@ Paginate: ?limit=N (default 50, max 200). When more rows remain, the response
 ends with a line # next: <cursor> (JSON: "next_cursor"); fetch the next page
 with ?cursor=<cursor> and keep the other params unchanged.
 Unknown field/operator/value -> 400 listing what is allowed.
+Activity at a glance: every list line carries activities=N (count) and
+last_activity (most recent), so you can tell active from dormant records without a
+fetch per row. To read what actually happened across a page, make one
+GET /activities?<kind>=<comma-separated handles> call (e.g.
+?company=company_a,company_b) and group the result by the company=/contact= handle
+each line carries - no per-record calls.
 
 ## SEARCH (find anything in one call)
 
@@ -188,7 +194,7 @@ GET /search?q=&types= find anything across contacts, companies, deals & tickets 
 GET /tokens list your active tokens (sessions)
 DELETE /tokens/{id} revoke one of your tokens (log out a session)
 
-GET /contacts?<filters>&search=&sort=&limit=&cursor= list/query contacts (see QUERY)
+GET /contacts?<filters>&search=&sort=&limit=&cursor= list/query contacts (see QUERY); each line carries activities=N & last_activity, so you see which records are active without a per-record fetch (same on the companies/deals/tickets lists)
 POST /contacts create OR update by email (upsert) {"name":...,"email":...,"company_id":...,"stage":...,"tags":[...],"custom":{...}}
 GET /contacts/{id} fetch one contact (includes created_by + an activity summary: activities=N, last_activity)
 PATCH /contacts/{id} update fields
@@ -235,7 +241,7 @@ DELETE /campaigns/{id}/members/{kind}/{id} detach one (e.g. .../members/contact/
 Shortcut: POST /contacts?campaign=campaign_..&reason=.. (and /companies) attaches the created/upserted record to the campaign in one call - so the usual loop is just POST /contacts?campaign=..
 
 GET /reminders?days=&limit= due/overdue tasks (open tasks whose due_at has arrived; each shows about=<linked record> and assignee; ?days=N looks ahead)
-GET /activities?contact=&deal=&company=&ticket=&limit= recent activities (each shows by= who logged it)
+GET /activities?contact=&deal=&company=&ticket=&limit= recent activities (each shows by= who logged it). Each filter takes one OR several comma-separated handles - e.g. ?company=company_a,company_b - so you pull the activity text for a whole list of records in one call (matches any of them), then group by the company=/contact= handle each line carries
 DELETE /activities/{id} delete one activity (one-shot, no confirm; e.g. a mistake or to free quota)
 GET /audit?by=&target=&limit= audit log = record history: who did what, and what changed (an update's detail shows the field diff, e.g. "stage: lead -> customer"). by=email filters to one member; target=<handle> (e.g. contact_k7m2q) scopes it to one record's history
 

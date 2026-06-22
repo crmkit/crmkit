@@ -77,6 +77,8 @@ func ContactLine(c protocol.Contact) string {
 		F("owner", c.Owner),
 		F("tags", strings.Join(c.Tags, ",")),
 		F("updated", date(c.UpdatedAt)),
+		F("activities", countField(c.ActivityCount)),
+		F("last_activity", datep(c.LastActivityAt)),
 	)
 }
 
@@ -164,6 +166,8 @@ func CompanyLine(c protocol.Company) string {
 		F("domain", c.Domain),
 		F("tags", strings.Join(c.Tags, ",")),
 		F("updated", date(c.UpdatedAt)),
+		F("activities", countField(c.ActivityCount)),
+		F("last_activity", datep(c.LastActivityAt)),
 	)
 }
 
@@ -209,6 +213,8 @@ func DealLine(d protocol.Deal) string {
 		F("contact", nameOrID(d.ContactName, d.ContactHandle)),
 		F("company", nameOrID(d.CompanyName, d.CompanyHandle)),
 		F("updated", date(d.UpdatedAt)),
+		F("activities", countField(d.ActivityCount)),
+		F("last_activity", datep(d.LastActivityAt)),
 	)
 }
 
@@ -261,6 +267,8 @@ func TicketLine(t protocol.Ticket) string {
 		F("assignee", t.Assignee),
 		F("tags", strings.Join(t.Tags, ",")),
 		F("updated", date(t.UpdatedAt)),
+		F("activities", countField(t.ActivityCount)),
+		F("last_activity", datep(t.LastActivityAt)),
 	)
 }
 

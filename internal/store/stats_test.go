@@ -66,3 +66,51 @@ func TestTotals(t *testing.T) {
 		}
 	}
 }
+
+func TestActivityStatsBatch(t *testing.T) {
+	st := newTestStore(t)
+	a, err := st.GetOrCreateIdentity("a@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ws := a.DefaultWorkspaceID
+
+	active := &protocol.Company{Name: "Active Co"}
+	quiet := &protocol.Company{Name: "Quiet Co"}
+	if err := st.CreateCompany(ws, active); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreateCompany(ws, quiet); err != nil {
+		t.Fatal(err)
+	}
+
+	// Two activities on the active company, none on the quiet one.
+	for _, body := range []string{"first", "second"} {
+		if err := st.CreateActivity(ws, &protocol.Activity{CompanyID: active.ID, Kind: "note", Body: body}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	stats, err := st.ActivityStatsBatch(ws, protocol.KindCompany, []string{active.ID, quiet.ID})
+	if err != nil {
+		t.Fatalf("batch: %v", err)
+	}
+	if got := stats[active.ID].Count; got != 2 {
+		t.Fatalf("active count = %d, want 2", got)
+	}
+	if stats[active.ID].Last.IsZero() {
+		t.Fatalf("active company should report a non-zero last-activity time")
+	}
+	// A record with no activity is absent from the map - callers treat missing as zero.
+	if _, ok := stats[quiet.ID]; ok {
+		t.Fatalf("quiet company has no activity and should be absent, got %+v", stats[quiet.ID])
+	}
+
+	// An unknown kind or empty id set yields an empty map without error.
+	if m, err := st.ActivityStatsBatch(ws, "bogus", []string{active.ID}); err != nil || len(m) != 0 {
+		t.Fatalf("unknown kind: len=%d err=%v, want 0 / nil", len(m), err)
+	}
+	if m, err := st.ActivityStatsBatch(ws, protocol.KindCompany, nil); err != nil || len(m) != 0 {
+		t.Fatalf("empty ids: len=%d err=%v, want 0 / nil", len(m), err)
+	}
+}

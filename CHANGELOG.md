@@ -2,6 +2,13 @@
 
 All notable changes to crmkit, following [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
+## [0.7.0] - 2026-06-22
+
+### Features
+
+- List endpoints (`/contacts`, `/companies`, `/deals`, `/tickets`) now carry an at-a-glance activity signal on every line: `activities=N` (how many activities reference the record) and `last_activity` (when the most recent was logged) — the same summary a single-record `GET` already shows, but for a whole page in one batched query. Quiet records add nothing (a zero count and empty timestamp are omitted), so a caller can tell which records are active without a fetch per record. The fields are computed on read only (never persisted).
+- `GET /activities` filters (`contact`, `deal`, `company`, `ticket`) now accept several comma-separated handles, not just one — e.g. `?company=company_a,company_b` matches the activity for any of them. This pulls the activity text for a whole list of records in a single call (group the results by the `company=`/`contact=` handle each line carries) instead of one request per record. A single handle still works exactly as before.
+
 ## [0.6.0] - 2026-06-18
 
 ### Features
