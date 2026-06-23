@@ -202,6 +202,12 @@ type Contact struct {
 	// agent sees there's history worth pulling without a blind second call.
 	ActivityCount  int        `json:"activity_count,omitempty"`
 	LastActivityAt *time.Time `json:"last_activity_at,omitempty"`
+	// OutreachCount / LastOutreachAt are the same summary restricted to outreach
+	// activity (call/email/meeting) - the "have we reached out" signal. Populated on
+	// a list fetch for display (never persisted); the matching list filters are
+	// outreach_count and last_outreach.
+	OutreachCount  int        `json:"outreach_count,omitempty"`
+	LastOutreachAt *time.Time `json:"last_outreach_at,omitempty"`
 }
 
 // Company is an organization that contacts and deals belong to.
@@ -222,6 +228,11 @@ type Company struct {
 	// populated on a single-record fetch for display (never persisted).
 	ActivityCount  int        `json:"activity_count,omitempty"`
 	LastActivityAt *time.Time `json:"last_activity_at,omitempty"`
+	// OutreachCount / LastOutreachAt are the same summary restricted to outreach
+	// activity (call/email/meeting); populated on a list fetch for display (never
+	// persisted). Matching list filters: outreach_count and last_outreach.
+	OutreachCount  int        `json:"outreach_count,omitempty"`
+	LastOutreachAt *time.Time `json:"last_outreach_at,omitempty"`
 }
 
 // Deal is an opportunity moving through a pipeline.
@@ -423,6 +434,7 @@ func (c Contact) Localized(loc *time.Location) Contact {
 	c.CreatedAt = inLoc(c.CreatedAt, loc)
 	c.UpdatedAt = inLoc(c.UpdatedAt, loc)
 	c.LastActivityAt = inLocPtr(c.LastActivityAt, loc)
+	c.LastOutreachAt = inLocPtr(c.LastOutreachAt, loc)
 	return c
 }
 
@@ -431,6 +443,7 @@ func (c Company) Localized(loc *time.Location) Company {
 	c.CreatedAt = inLoc(c.CreatedAt, loc)
 	c.UpdatedAt = inLoc(c.UpdatedAt, loc)
 	c.LastActivityAt = inLocPtr(c.LastActivityAt, loc)
+	c.LastOutreachAt = inLocPtr(c.LastOutreachAt, loc)
 	return c
 }
 
