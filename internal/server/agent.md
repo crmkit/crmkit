@@ -153,9 +153,12 @@ Filter by any allowed field as field=[op:]value ; repeated params are AND-ed:
 ?due_at=is:null is:null / not:null check empty / non-empty
 \*\_at fields accept RFC3339, e.g. created_at=gte:2026-01-01T00:00:00Z
 Fuzzy search across key fields: ?search=acme
-Filter by creator: ?created_by=agent@x.com - every record is stamped with the
-member (human or agent) that created it; filter to organise records by who made
-them.
+Filter by creator or principal: ?created_by=agent@x.com is who WROTE the record
+(every record is stamped with the member - human or agent - that created it);
+?on_behalf_of=alice@acme.com is who work was done FOR. on_behalf_of is set per
+ACTIVITY and rolls up to the contact/company/deal/ticket the activity belongs to, so
+?on_behalf_of= filters those lists by who has worked the record (derived from its
+activities; case-insensitive). See ACTING FOR SOMEONE.
 Group by tags: contacts and companies carry a tags array (e.g. "competitor",
 "watchlist", "fintech"). Set them on create/update; filter with ?tags=competitor
 (repeat or comma-separate to require several, e.g. ?tags=competitor,fintech).
@@ -198,6 +201,22 @@ page stays queryable:
 To find who you have or haven't reached, use the outreach filters under QUERY above
 - no tag required.
 
+ACTING FOR SOMEONE: when you log an activity you carried out for someone, set
+"on_behalf_of" on the ACTIVITY to that person - an email by convention (their
+workspace member email, though any email works). It is recorded separately from who
+actually wrote the row (created_by / the "by=" actor, always your own token):
+created_by is you/the agent, on_behalf_of is the principal you did it for. Omit it
+when acting as yourself.
+
+That per-activity principal rolls up automatically. Each contact, company, deal and
+ticket shows on_behalf_of=<the set of people who have worked it> on its line, derived
+from its activities - so when two people work the same deal, BOTH appear (it is a
+set, not one value). And every such list is filterable: GET /deals?on_behalf_of=alice@acme.com
+returns the deals Alice has worked, GET /contacts?on_behalf_of=alice@acme.com the
+contacts, etc. (case-insensitive). Tasks and campaigns have no activities, so they
+carry no on_behalf_of. You can still pull one principal's raw activity with
+GET /activities?on_behalf_of=alice@acme.com.
+
 ## SEARCH (find anything in one call)
 
 GET /search?q=acme runs the fuzzy search across contacts, companies, deals AND
@@ -223,7 +242,7 @@ GET /contacts/{id} fetch one contact (includes created_by + an activity summary:
 PATCH /contacts/{id} update fields
 DELETE /contacts/{id}?confirm= delete (two-step)
 GET /contacts/{id}/activities activity log for a contact
-POST /contacts/{id}/activities log {"kind":"call|email|meeting|note|task","body":...}
+POST /contacts/{id}/activities log {"kind":"call|email|meeting|note|task","body":...,"on_behalf_of":"alice@acme.com"} (on_behalf_of optional: the person you did this for; see RECORDING CONTACT)
 
 GET /companies?<filters>&search=&sort=&limit=&cursor= list/query companies (see QUERY; search covers name, domain, notes)
 POST /companies create OR update by domain (upsert) {"name":...,"domain":...,"tags":[...],"notes":"...","custom":{...}}
@@ -231,13 +250,15 @@ GET /companies/{id} fetch one company (includes created_by + an activity summary
 PATCH /companies/{id} update fields
 DELETE /companies/{id}?confirm= delete (two-step)
 GET /companies/{id}/activities activity log for a company
-POST /companies/{id}/activities log {"kind":"call|email|meeting|note|task","body":...}
+POST /companies/{id}/activities log {"kind":"call|email|meeting|note|task","body":...,"on_behalf_of":"..."} (on_behalf_of optional)
 
 GET /deals?<filters>&search=&sort=&limit=&cursor= list/query deals (see QUERY)
 POST /deals create {"title":...,"amount_cents":...,"currency":"USD","stage":...,"contact_id":...,"company_id":...}
 GET /deals/{id} fetch one deal (includes created_by + an activity summary: activities=N, last_activity)
 PATCH /deals/{id} update (e.g. {"stage":"won","status":"won"})
 DELETE /deals/{id}?confirm= delete (two-step)
+GET /deals/{id}/activities activity log for a deal
+POST /deals/{id}/activities log {"kind":"call|email|meeting|note|task","body":...,"on_behalf_of":"..."} (on_behalf_of optional)
 
 GET /tickets?<filters>&search=&sort=&limit=&cursor= list/query support tickets (see QUERY; search covers subject, content; filter status=open|pending|solved, assignee=, requester_id=)
 POST /tickets create {"subject":...,"content":...,"requester_id":"contact_...","assignee":"agent@x.com","status":"open"}
@@ -245,7 +266,7 @@ GET /tickets/{id} fetch one ticket (includes a conversation summary: activities=
 PATCH /tickets/{id} update (e.g. {"status":"solved"}); supports If-Match / "version" for concurrency
 DELETE /tickets/{id}?confirm= delete (two-step)
 GET /tickets/{id}/activities the ticket's conversation (notes/replies, newest first)
-POST /tickets/{id}/activities log {"kind":"note|call|email|meeting|task","body":...} onto the ticket
+POST /tickets/{id}/activities log {"kind":"note|call|email|meeting|task","body":...,"on_behalf_of":"..."} onto the ticket (on_behalf_of optional)
 
 GET /tasks?<filters>&search=&sort=&limit=&cursor= list/query tasks (see QUERY; search covers title; filter assignee=, contact_id=, deal_id=, company_id=, ticket_id=, due_at=, done_at=; open tasks = done_at=is:null)
 POST /tasks create {"title":...,"due_at":"2026-06-20T09:00:00Z","assignee":"agent@x.com","contact_id":"contact_..","deal_id":"deal_.."} - any of contact/company/deal/ticket may be linked, all optional
@@ -264,7 +285,7 @@ DELETE /campaigns/{id}/members/{kind}/{id} detach one (e.g. .../members/contact/
 Shortcut: POST /contacts?campaign=campaign_..&reason=.. (and /companies) attaches the created/upserted record to the campaign in one call - so the usual loop is just POST /contacts?campaign=..
 
 GET /reminders?days=&limit= due/overdue tasks (open tasks whose due_at has arrived; each shows about=<linked record> and assignee; ?days=N looks ahead)
-GET /activities?contact=&deal=&company=&ticket=&limit= recent activities (each shows by= who logged it). Each filter takes one OR several comma-separated handles - e.g. ?company=company_a,company_b - so you pull the activity text for a whole list of records in one call (matches any of them), then group by the company=/contact= handle each line carries
+GET /activities?contact=&deal=&company=&ticket=&on_behalf_of=&limit= recent activities (each shows by= who logged it, and on_behalf_of= the person it was done for, if any). The contact/deal/company/ticket filters each take one OR several comma-separated handles - e.g. ?company=company_a,company_b - so you pull the activity text for a whole list of records in one call (matches any of them), then group by the company=/contact= handle each line carries. on_behalf_of=<email> narrows to one principal (case-insensitive) - everything done for that person
 DELETE /activities/{id} delete one activity (one-shot, no confirm; e.g. a mistake or to free quota)
 GET /audit?by=&target=&limit= audit log = record history: who did what, and what changed (an update's detail shows the field diff, e.g. "stage: lead -> customer"). by=email filters to one member; target=<handle> (e.g. contact_k7m2q) scopes it to one record's history
 

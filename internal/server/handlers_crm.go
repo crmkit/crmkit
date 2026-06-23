@@ -177,7 +177,9 @@ func (s *Server) fillContactActivity(ws string, list []protocol.Contact) {
 	if err != nil {
 		return
 	}
+	principals, _ := s.store.ActivityPrincipalsBatch(ws, protocol.KindContact, ids)
 	for i := range list {
+		list[i].OnBehalfOf = principals[list[i].ID]
 		if st, ok := stats[list[i].ID]; ok {
 			list[i].ActivityCount = st.Count
 			if !st.Last.IsZero() {
@@ -206,7 +208,9 @@ func (s *Server) fillCompanyActivity(ws string, list []protocol.Company) {
 	if err != nil {
 		return
 	}
+	principals, _ := s.store.ActivityPrincipalsBatch(ws, protocol.KindCompany, ids)
 	for i := range list {
+		list[i].OnBehalfOf = principals[list[i].ID]
 		if st, ok := stats[list[i].ID]; ok {
 			list[i].ActivityCount = st.Count
 			if !st.Last.IsZero() {
@@ -235,7 +239,9 @@ func (s *Server) fillDealActivity(ws string, list []protocol.Deal) {
 	if err != nil {
 		return
 	}
+	principals, _ := s.store.ActivityPrincipalsBatch(ws, protocol.KindDeal, ids)
 	for i := range list {
+		list[i].OnBehalfOf = principals[list[i].ID]
 		if st, ok := stats[list[i].ID]; ok {
 			list[i].ActivityCount = st.Count
 			if !st.Last.IsZero() {
@@ -259,7 +265,9 @@ func (s *Server) fillTicketActivity(ws string, list []protocol.Ticket) {
 	if err != nil {
 		return
 	}
+	principals, _ := s.store.ActivityPrincipalsBatch(ws, protocol.KindTicket, ids)
 	for i := range list {
+		list[i].OnBehalfOf = principals[list[i].ID]
 		if st, ok := stats[list[i].ID]; ok {
 			list[i].ActivityCount = st.Count
 			if !st.Last.IsZero() {
@@ -390,6 +398,9 @@ func (s *Server) handleGetContact(w http.ResponseWriter, r *http.Request) {
 			c.LastActivityAt = &last
 		}
 	}
+	if pr, err := s.store.ActivityPrincipalsBatch(sess.WorkspaceID, protocol.KindContact, []string{c.ID}); err == nil {
+		c.OnBehalfOf = pr[c.ID]
+	}
 	c = c.Localized(locationOf(sess))
 	render.Respond(w, r, http.StatusOK, c, render.Contact(c))
 }
@@ -459,7 +470,7 @@ func (s *Server) handleListContactActivities(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	limit := render.Int(r.URL.Query().Get("limit"), 50)
-	list, err := s.store.ListActivities(sess.WorkspaceID, []string{id}, nil, nil, nil, limit)
+	list, err := s.store.ListActivities(sess.WorkspaceID, []string{id}, nil, nil, nil, r.URL.Query().Get("on_behalf_of"), limit)
 	if err != nil {
 		s.serverErr(w, r)
 		return
@@ -489,6 +500,12 @@ func (s *Server) handleCreateContactActivity(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	a.ContactID = id
+	// Resolve any cross-linked records sent in the body (handles -> internal ids), so
+	// the activity attaches by id like the path record does - otherwise a handle would
+	// be stored verbatim and roll-ups/filters keyed on the id would miss it.
+	a.DealID = s.relationID(sess.WorkspaceID, protocol.KindDeal, a.DealID)
+	a.CompanyID = s.relationID(sess.WorkspaceID, protocol.KindCompany, a.CompanyID)
+	a.TicketID = s.relationID(sess.WorkspaceID, protocol.KindTicket, a.TicketID)
 	a.CreatedBy = sess.Email
 	if err := s.store.CreateActivity(sess.WorkspaceID, &a); err != nil {
 		s.serverErr(w, r)
@@ -505,7 +522,7 @@ func (s *Server) handleListCompanyActivities(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	limit := render.Int(r.URL.Query().Get("limit"), 50)
-	list, err := s.store.ListActivities(sess.WorkspaceID, nil, nil, []string{id}, nil, limit)
+	list, err := s.store.ListActivities(sess.WorkspaceID, nil, nil, []string{id}, nil, r.URL.Query().Get("on_behalf_of"), limit)
 	if err != nil {
 		s.serverErr(w, r)
 		return
@@ -534,6 +551,62 @@ func (s *Server) handleCreateCompanyActivity(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	a.CompanyID = id
+	// Resolve cross-linked records from the body (handles -> internal ids); see
+	// handleCreateContactActivity.
+	a.ContactID = s.relationID(sess.WorkspaceID, protocol.KindContact, a.ContactID)
+	a.DealID = s.relationID(sess.WorkspaceID, protocol.KindDeal, a.DealID)
+	a.TicketID = s.relationID(sess.WorkspaceID, protocol.KindTicket, a.TicketID)
+	a.CreatedBy = sess.Email
+	if err := s.store.CreateActivity(sess.WorkspaceID, &a); err != nil {
+		s.serverErr(w, r)
+		return
+	}
+	s.audit(sess, "activity.create", protocol.Handle(protocol.KindActivity, a.ID), a.Kind)
+	a = a.Localized(locationOf(sess))
+	render.Respond(w, r, http.StatusCreated, a, render.ActivityLine(a))
+}
+
+func (s *Server) handleListDealActivities(w http.ResponseWriter, r *http.Request) {
+	sess := sessionFrom(r)
+	id, ok := s.resolveID(w, r, protocol.KindDeal)
+	if !ok {
+		return
+	}
+	limit := render.Int(r.URL.Query().Get("limit"), 50)
+	list, err := s.store.ListActivities(sess.WorkspaceID, nil, []string{id}, nil, nil, r.URL.Query().Get("on_behalf_of"), limit)
+	if err != nil {
+		s.serverErr(w, r)
+		return
+	}
+	list = localizedSlice(list, locationOf(sess))
+	s.respondList(w, r, list, render.Activities(list), nil, "")
+}
+
+func (s *Server) handleCreateDealActivity(w http.ResponseWriter, r *http.Request) {
+	sess := sessionFrom(r)
+	id, ok := s.resolveID(w, r, protocol.KindDeal)
+	if !ok {
+		return
+	}
+	var a protocol.Activity
+	if err := decodeJSON(r, &a); err != nil {
+		render.Error(w, r, http.StatusBadRequest, "bad_request",
+			`Send JSON, e.g. {"kind":"meeting","body":"Walked through pricing"}. kind is one of note|call|email|meeting|task.`)
+		return
+	}
+	if strings.TrimSpace(a.Body) == "" {
+		render.Error(w, r, http.StatusBadRequest, "missing_field", `"body" is required to log an activity.`)
+		return
+	}
+	if !s.enforceWorkspaceQuota(w, r, sess.WorkspaceID, "activities") {
+		return
+	}
+	a.DealID = id
+	// Resolve cross-linked records from the body (handles -> internal ids); see
+	// handleCreateContactActivity.
+	a.ContactID = s.relationID(sess.WorkspaceID, protocol.KindContact, a.ContactID)
+	a.CompanyID = s.relationID(sess.WorkspaceID, protocol.KindCompany, a.CompanyID)
+	a.TicketID = s.relationID(sess.WorkspaceID, protocol.KindTicket, a.TicketID)
 	a.CreatedBy = sess.Email
 	if err := s.store.CreateActivity(sess.WorkspaceID, &a); err != nil {
 		s.serverErr(w, r)
@@ -658,6 +731,9 @@ func (s *Server) handleGetCompany(w http.ResponseWriter, r *http.Request) {
 		if !last.IsZero() {
 			c.LastActivityAt = &last
 		}
+	}
+	if pr, err := s.store.ActivityPrincipalsBatch(sess.WorkspaceID, protocol.KindCompany, []string{c.ID}); err == nil {
+		c.OnBehalfOf = pr[c.ID]
 	}
 	c = c.Localized(locationOf(sess))
 	render.Respond(w, r, http.StatusOK, c, render.Company(c))
@@ -784,6 +860,9 @@ func (s *Server) handleGetDeal(w http.ResponseWriter, r *http.Request) {
 		if !last.IsZero() {
 			d.LastActivityAt = &last
 		}
+	}
+	if pr, err := s.store.ActivityPrincipalsBatch(sess.WorkspaceID, protocol.KindDeal, []string{d.ID}); err == nil {
+		d.OnBehalfOf = pr[d.ID]
 	}
 	d = d.Localized(locationOf(sess))
 	render.Respond(w, r, http.StatusOK, d, render.Deal(d))
@@ -927,6 +1006,9 @@ func (s *Server) handleGetTicket(w http.ResponseWriter, r *http.Request) {
 			t.LastActivityAt = &last
 		}
 	}
+	if pr, err := s.store.ActivityPrincipalsBatch(sess.WorkspaceID, protocol.KindTicket, []string{t.ID}); err == nil {
+		t.OnBehalfOf = pr[t.ID]
+	}
 	t = t.Localized(locationOf(sess))
 	render.Respond(w, r, http.StatusOK, t, render.Ticket(t))
 }
@@ -940,7 +1022,7 @@ func (s *Server) handleListTicketActivities(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	limit := render.Int(r.URL.Query().Get("limit"), 50)
-	list, err := s.store.ListActivities(sess.WorkspaceID, nil, nil, nil, []string{id}, limit)
+	list, err := s.store.ListActivities(sess.WorkspaceID, nil, nil, nil, []string{id}, r.URL.Query().Get("on_behalf_of"), limit)
 	if err != nil {
 		s.serverErr(w, r)
 		return
@@ -969,6 +1051,11 @@ func (s *Server) handleCreateTicketActivity(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	a.TicketID = id
+	// Resolve cross-linked records from the body (handles -> internal ids); see
+	// handleCreateContactActivity.
+	a.ContactID = s.relationID(sess.WorkspaceID, protocol.KindContact, a.ContactID)
+	a.DealID = s.relationID(sess.WorkspaceID, protocol.KindDeal, a.DealID)
+	a.CompanyID = s.relationID(sess.WorkspaceID, protocol.KindCompany, a.CompanyID)
 	a.CreatedBy = sess.Email
 	if err := s.store.CreateActivity(sess.WorkspaceID, &a); err != nil {
 		s.serverErr(w, r)
@@ -1221,7 +1308,8 @@ func (s *Server) handleListActivities(w http.ResponseWriter, r *http.Request) {
 	dealIDs := s.relationIDs(sess.WorkspaceID, protocol.KindDeal, q.Get("deal"))
 	companyIDs := s.relationIDs(sess.WorkspaceID, protocol.KindCompany, q.Get("company"))
 	ticketIDs := s.relationIDs(sess.WorkspaceID, protocol.KindTicket, q.Get("ticket"))
-	list, err := s.store.ListActivities(sess.WorkspaceID, contactIDs, dealIDs, companyIDs, ticketIDs, render.Int(q.Get("limit"), 50))
+	// on_behalf_of filters to the principal an agent acted for (e.g. ?on_behalf_of=alice@acme.com).
+	list, err := s.store.ListActivities(sess.WorkspaceID, contactIDs, dealIDs, companyIDs, ticketIDs, q.Get("on_behalf_of"), render.Int(q.Get("limit"), 50))
 	if err != nil {
 		s.serverErr(w, r)
 		return

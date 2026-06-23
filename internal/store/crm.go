@@ -808,12 +808,13 @@ func (s *sqlStore) CreateActivity(ws string, a *protocol.Activity) error {
 	if a.Kind == "" {
 		a.Kind = "note"
 	}
+	a.OnBehalfOf = strings.TrimSpace(a.OnBehalfOf)
 	a.CreatedAt = now
 	var err error
 	a.Handle, err = s.genHandle(func(handle string) error {
 		_, e := s.exec(`
-INSERT INTO activities (id, workspace_id, handle, contact_id, deal_id, company_id, ticket_id, kind, body, created_by, created_at)
-VALUES (?,?,?,?,?,?,?,?,?,?,?)`, a.ID, ws, handle, a.ContactID, a.DealID, a.CompanyID, a.TicketID, a.Kind, a.Body, a.CreatedBy, unix(now))
+INSERT INTO activities (id, workspace_id, handle, contact_id, deal_id, company_id, ticket_id, kind, body, on_behalf_of, created_by, created_at)
+VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`, a.ID, ws, handle, a.ContactID, a.DealID, a.CompanyID, a.TicketID, a.Kind, a.Body, a.OnBehalfOf, a.CreatedBy, unix(now))
 		return e
 	})
 	return err
@@ -834,13 +835,13 @@ func (s *sqlStore) DeleteActivity(ws, id string) error {
 // ids and matches any of them (col IN (...)), so a caller can pull the timeline
 // for one record or for a whole list of them - e.g. every company on a page - in
 // one call. A nil/empty set drops that filter.
-func (s *sqlStore) ListActivities(ws string, contactIDs, dealIDs, companyIDs, ticketIDs []string, limit int) ([]protocol.Activity, error) {
+func (s *sqlStore) ListActivities(ws string, contactIDs, dealIDs, companyIDs, ticketIDs []string, onBehalfOf string, limit int) ([]protocol.Activity, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 50
 	}
 	args := []any{ws}
 	sb := strings.Builder{}
-	sb.WriteString(`SELECT id, handle, contact_id, deal_id, company_id, ticket_id, kind, body, created_by, created_at FROM activities WHERE workspace_id = ?`)
+	sb.WriteString(`SELECT id, handle, contact_id, deal_id, company_id, ticket_id, kind, body, on_behalf_of, created_by, created_at FROM activities WHERE workspace_id = ?`)
 	addIn := func(col string, ids []string) {
 		ids = distinctNonEmpty(ids)
 		if len(ids) == 0 {
@@ -856,6 +857,13 @@ func (s *sqlStore) ListActivities(ws string, contactIDs, dealIDs, companyIDs, ti
 	addIn("deal_id", dealIDs)
 	addIn("company_id", companyIDs)
 	addIn("ticket_id", ticketIDs)
+	// Filter to one principal an agent acted for - emails are matched case-
+	// insensitively (like the audit actor filter), so the case the agent typed
+	// doesn't matter.
+	if onBehalfOf = strings.TrimSpace(onBehalfOf); onBehalfOf != "" {
+		sb.WriteString(` AND lower(on_behalf_of) = lower(?)`)
+		args = append(args, onBehalfOf)
+	}
 	sb.WriteString(` ORDER BY created_at DESC LIMIT ?`)
 	args = append(args, limit)
 
@@ -870,12 +878,14 @@ func (s *sqlStore) ListActivities(ws string, contactIDs, dealIDs, companyIDs, ti
 		var (
 			a                                         protocol.Activity
 			contact, deal, company, ticket, createdBy sql.NullString
+			onBehalf                                  sql.NullString
 			created                                   int64
 		)
-		if err := rows.Scan(&a.ID, &a.Handle, &contact, &deal, &company, &ticket, &a.Kind, &a.Body, &createdBy, &created); err != nil {
+		if err := rows.Scan(&a.ID, &a.Handle, &contact, &deal, &company, &ticket, &a.Kind, &a.Body, &onBehalf, &createdBy, &created); err != nil {
 			return nil, err
 		}
 		a.ContactID, a.DealID, a.CompanyID, a.TicketID, a.CreatedBy = contact.String, deal.String, company.String, ticket.String, createdBy.String
+		a.OnBehalfOf = onBehalf.String
 		a.CreatedAt = fromUnix(created)
 		out = append(out, a)
 	}
@@ -1002,6 +1012,46 @@ func (s *sqlStore) ActivityStatsBatch(ws, kind string, ids []string) (map[string
 			st.LastOutreach = fromUnix(lastOutreach)
 		}
 		out[id] = st
+	}
+	return out, rows.Err()
+}
+
+// ActivityPrincipalsBatch returns the distinct on_behalf_of principals recorded on
+// each record's activities - the set of people work has been done for - keyed by
+// internal record id, sorted, with blanks skipped. kind selects the activities
+// column (contact|deal|company|ticket). It is the list-friendly source for a
+// record's DERIVED on_behalf_of set (an agent can act for several people on one
+// record). An unknown kind or empty ids yields an empty map without querying.
+func (s *sqlStore) ActivityPrincipalsBatch(ws, kind string, ids []string) (map[string][]string, error) {
+	out := map[string][]string{}
+	col, ok := activityCol[kind]
+	if !ok {
+		return out, nil
+	}
+	ids = distinctNonEmpty(ids)
+	if len(ids) == 0 {
+		return out, nil
+	}
+	ph := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
+	args := make([]any, 0, len(ids)+1)
+	args = append(args, ws)
+	for _, id := range ids {
+		args = append(args, id)
+	}
+	rows, err := s.query(
+		"SELECT "+col+", on_behalf_of FROM activities WHERE workspace_id = ? AND "+col+" IN ("+ph+")"+
+			" AND on_behalf_of IS NOT NULL AND on_behalf_of <> '' GROUP BY "+col+", on_behalf_of ORDER BY "+col+", on_behalf_of",
+		args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, principal string
+		if err := rows.Scan(&id, &principal); err != nil {
+			return nil, err
+		}
+		out[id] = append(out[id], principal)
 	}
 	return out, rows.Err()
 }

@@ -2,6 +2,19 @@
 
 All notable changes to crmkit, following [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
+## [0.9.0] - 2026-06-23
+
+### Features
+
+- **On-behalf-of attribution.** Activities can record who an agent acted **on behalf of**: an optional `on_behalf_of` on activity creation (`POST /{contacts,companies,tickets}/{id}/activities`) names the principal an interaction was performed for — an email by convention (like `owner`/`assignee`), client-supplied, so it can name a teammate who has no crmkit account. It is a distinct attribution axis from `created_by`/`by=`, which stays the actor that actually wrote the row (the agent's own token): `by=` is who logged it, `on_behalf_of=` is who it was done for. It shows on every activity line and is filterable on the feed — `GET /activities?on_behalf_of=alice@acme.com` (case-insensitive).
+- That per-activity principal **rolls up** to the records the activity belongs to. Each contact, company, deal, and ticket surfaces `on_behalf_of=<the set of people who have worked it>` on its line and detail — derived from its activities, so when several people work the same deal they **all** appear (it is a set, never a single overwritten value). Every such list is filterable by principal: `GET /deals?on_behalf_of=alice@acme.com`, `GET /contacts?on_behalf_of=alice@acme.com`, etc. The roll-up is computed on read (never stored), so it can't drift from the activity log it derives from. Tasks and campaigns have no activities and carry no `on_behalf_of`.
+- Deals get their own activity endpoints, `GET/POST /deals/{id}/activities`, matching contacts/companies/tickets — so you log work straight onto a deal instead of cross-linking it from another record's activity. (The cross-link route still works and now resolves handles; see Fixed.)
+- Adds migration **v19** (a nullable `on_behalf_of` column and its index on `activities` — the only place it is stored; the record roll-ups need no schema). Existing activities are unaffected. Back up, then run `crmkitd migrate --execute` after upgrading.
+
+### Fixed
+
+- Logging an activity that cross-links another record by **handle** in the body (e.g. `POST /contacts/{id}/activities {"deal_id":"deal_x7k2", …}`) now resolves that handle to the internal id before storing, instead of saving the handle verbatim. Previously such an activity was invisible to anything keyed on the id — the linked deal's/company's/ticket's activity count, `last_activity`, the `?deal=`/`?company=`/`?ticket=` activity feed filter, and the new `on_behalf_of` roll-up all missed it. The path record was always resolved; this extends the same resolution to the body's cross-link ids.
+
 ## [0.8.0] - 2026-06-23
 
 ### Features

@@ -155,9 +155,10 @@ type Store interface {
 	// activities & audit
 	CreateActivity(ws string, a *protocol.Activity) error
 	DeleteActivity(ws, id string) error
-	ListActivities(ws string, contactIDs, dealIDs, companyIDs, ticketIDs []string, limit int) ([]protocol.Activity, error)
+	ListActivities(ws string, contactIDs, dealIDs, companyIDs, ticketIDs []string, onBehalfOf string, limit int) ([]protocol.Activity, error)
 	ActivityStats(ws, contactID, dealID, companyID, ticketID string) (int, time.Time, error)
 	ActivityStatsBatch(ws, kind string, ids []string) (map[string]ActivityStat, error)
+	ActivityPrincipalsBatch(ws, kind string, ids []string) (map[string][]string, error)
 	WriteAudit(ws, tokenID, actorEmail, action, target, detail string) error
 	ListAudit(ws, actorEmail, target string, limit int) ([]AuditEntry, error)
 	PruneAuditForPlan(plan string, before int64) (int64, error)
