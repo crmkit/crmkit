@@ -174,6 +174,29 @@ fetch per row. To read what actually happened across a page, make one
 GET /activities?<kind>=<comma-separated handles> call (e.g.
 ?company=company_a,company_b) and group the result by the company=/contact= handle
 each line carries - no per-record calls.
+Outreach: each contact/company line also carries outreach=N and last_outreach -
+the activity subset of kinds call/email/meeting, i.e. "we reached out" (vs
+note/task, which don't count). The same signal is filterable, so you segment who
+you have / haven't reached without a tag: ?last_outreach=is:null (never contacted),
+?last_outreach=lt:2026-05-01T00:00:00Z (reached before, now cold),
+?outreach_count=gte:1 (reached at least once).
+
+## RECORDING CONTACT - one field per job
+
+"We contacted them" is an EVENT, not a label. Keep three jobs in three fields so a
+page stays queryable:
+
+- EVENT (you called, emailed, or met someone) -> log an activity:
+  POST /contacts/{id}/activities {"kind":"email","body":"..."}. The activity log is
+  the system of record for outreach - it keeps when, what, and who. Do NOT mark
+  "contacted" with a tag; a tag can't say when or how often.
+- LIFECYCLE (where the contact sits in your funnel) -> stage, e.g.
+  new -> contacted -> engaged -> qualified -> customer. PATCH it as things move.
+- LABEL (durable segments like "fintech", "watchlist", "competitor") -> tags.
+  Tags group records; they are not events or state.
+
+To find who you have or haven't reached, use the outreach filters under QUERY above
+- no tag required.
 
 ## SEARCH (find anything in one call)
 

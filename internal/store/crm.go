@@ -924,11 +924,23 @@ func (s *sqlStore) ActivityStats(ws, contactID, dealID, companyID, ticketID stri
 	return count, fromUnix(last), nil
 }
 
+// OutreachKindsSQL is the SQL value list of activity kinds that count as outreach
+// ("we reached out": call/email/meeting, as opposed to note/task). It is the single
+// source of truth shared by the activity-stats display (ActivityStatsBatch) and the
+// list filters (last_outreach / outreach_count in the server's query whitelist), so
+// the number an agent filters on can never drift from the one it sees. The values
+// are code-controlled literals (no user input), so interpolating them is safe.
+const OutreachKindsSQL = `'call','email','meeting'`
+
 // ActivityStat is a per-record activity summary: how many activities reference a
 // record and when the most recent was logged (zero time when there are none).
+// Outreach / LastOutreach are the same two figures restricted to outreach kinds
+// (OutreachKindsSQL) - the subset that means we reached out.
 type ActivityStat struct {
-	Count int
-	Last  time.Time
+	Count        int
+	Last         time.Time
+	Outreach     int
+	LastOutreach time.Time
 }
 
 // activityCol maps an entity kind to the activities column that references it.
@@ -964,7 +976,10 @@ func (s *sqlStore) ActivityStatsBatch(ws, kind string, ids []string) (map[string
 		args = append(args, id)
 	}
 	rows, err := s.query(
-		"SELECT "+col+", count(*), coalesce(max(created_at), 0) FROM activities WHERE workspace_id = ? AND "+col+" IN ("+ph+") GROUP BY "+col,
+		"SELECT "+col+", count(*), coalesce(max(created_at), 0),"+
+			" coalesce(sum(CASE WHEN kind IN ("+OutreachKindsSQL+") THEN 1 ELSE 0 END), 0),"+
+			" coalesce(max(CASE WHEN kind IN ("+OutreachKindsSQL+") THEN created_at END), 0)"+
+			" FROM activities WHERE workspace_id = ? AND "+col+" IN ("+ph+") GROUP BY "+col,
 		args...)
 	if err != nil {
 		return nil, err
@@ -972,16 +987,19 @@ func (s *sqlStore) ActivityStatsBatch(ws, kind string, ids []string) (map[string
 	defer rows.Close()
 	for rows.Next() {
 		var (
-			id    string
-			count int
-			last  int64
+			id                 string
+			count, outreach    int
+			last, lastOutreach int64
 		)
-		if err := rows.Scan(&id, &count, &last); err != nil {
+		if err := rows.Scan(&id, &count, &last, &outreach, &lastOutreach); err != nil {
 			return nil, err
 		}
-		st := ActivityStat{Count: count}
+		st := ActivityStat{Count: count, Outreach: outreach}
 		if last != 0 {
 			st.Last = fromUnix(last)
+		}
+		if lastOutreach != 0 {
+			st.LastOutreach = fromUnix(lastOutreach)
 		}
 		out[id] = st
 	}

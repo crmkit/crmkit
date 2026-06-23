@@ -184,6 +184,11 @@ func (s *Server) fillContactActivity(ws string, list []protocol.Contact) {
 				t := st.Last
 				list[i].LastActivityAt = &t
 			}
+			list[i].OutreachCount = st.Outreach
+			if !st.LastOutreach.IsZero() {
+				t := st.LastOutreach
+				list[i].LastOutreachAt = &t
+			}
 		}
 	}
 }
@@ -207,6 +212,11 @@ func (s *Server) fillCompanyActivity(ws string, list []protocol.Company) {
 			if !st.Last.IsZero() {
 				t := st.Last
 				list[i].LastActivityAt = &t
+			}
+			list[i].OutreachCount = st.Outreach
+			if !st.LastOutreach.IsZero() {
+				t := st.LastOutreach
+				list[i].LastOutreachAt = &t
 			}
 		}
 	}

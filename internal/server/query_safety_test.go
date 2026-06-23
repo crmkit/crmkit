@@ -8,8 +8,16 @@ import (
 )
 
 // plainIdentRe is a lowercase SQL identifier with no metacharacters - the only
-// shape an identifier interpolated into a query may take.
+// shape a bare identifier interpolated into a query may take.
 var plainIdentRe = regexp.MustCompile(`^[a-z_][a-z0-9_]*$`)
+
+// safeColumn reports whether an interpolated filter column is permitted: either a
+// plain identifier or one of the vetted, code-controlled derived expressions
+// (derivedExprs). Both are free of user input, which is the property that keeps
+// interpolating them injection-safe.
+func safeColumn(col string) bool {
+	return plainIdentRe.MatchString(col) || derivedExprs[col]
+}
 
 // TestQueryIdentifiersAndOpsAreSafe is the structural guard: it asserts the
 // PROPERTY the injection tests sample for. buildListSQL interpolates only
@@ -22,8 +30,8 @@ func TestQueryIdentifiersAndOpsAreSafe(t *testing.T) {
 	configs := map[string]queryConfig{"contacts": contactQuery, "companies": companyQuery, "deals": dealQuery}
 	for name, cfg := range configs {
 		for field, spec := range cfg.filter {
-			if !plainIdentRe.MatchString(spec.column) {
-				t.Errorf("%s: filter %q maps to non-identifier column %q", name, field, spec.column)
+			if !safeColumn(spec.column) {
+				t.Errorf("%s: filter %q maps to unsafe column %q", name, field, spec.column)
 			}
 		}
 		for field, spec := range cfg.sortBy {
@@ -84,8 +92,8 @@ func FuzzParseListQuery(f *testing.F) {
 			return // rejected input is the safe outcome
 		}
 		for _, flt := range q.Filters {
-			if !plainIdentRe.MatchString(flt.Column) {
-				t.Fatalf("parse produced non-identifier filter column %q from %q=%q", flt.Column, field, value)
+			if !safeColumn(flt.Column) {
+				t.Fatalf("parse produced unsafe filter column %q from %q=%q", flt.Column, field, value)
 			}
 			if flt.JSONKey != "" && !customKeyRe.MatchString(flt.JSONKey) {
 				t.Fatalf("parse produced unvalidated JSON key %q from %q=%q", flt.JSONKey, field, value)

@@ -79,6 +79,8 @@ func ContactLine(c protocol.Contact) string {
 		F("updated", date(c.UpdatedAt)),
 		F("activities", countField(c.ActivityCount)),
 		F("last_activity", datep(c.LastActivityAt)),
+		F("outreach", countField(c.OutreachCount)),
+		F("last_outreach", datep(c.LastOutreachAt)),
 	)
 }
 
@@ -168,6 +170,8 @@ func CompanyLine(c protocol.Company) string {
 		F("updated", date(c.UpdatedAt)),
 		F("activities", countField(c.ActivityCount)),
 		F("last_activity", datep(c.LastActivityAt)),
+		F("outreach", countField(c.OutreachCount)),
+		F("last_outreach", datep(c.LastOutreachAt)),
 	)
 }
 

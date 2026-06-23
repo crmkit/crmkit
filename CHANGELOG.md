@@ -2,6 +2,12 @@
 
 All notable changes to crmkit, following [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
+## [0.8.0] - 2026-06-23
+
+### Features
+
+- Outreach signal on contacts and companies. Every list line now also carries `outreach=N` and `last_outreach` — the activity subset of the kinds that mean "we reached out" (`call`/`email`/`meeting`), distinct from the all-kinds `activities`/`last_activity` already shown (a logged `note` or `task` does not count). The same signal is filterable, so segmenting who you have or haven't contacted no longer needs a tag: `?last_outreach=is:null` (never contacted), `?last_outreach=lt:2026-05-01T00:00:00Z` (reached before, now cold), `?outreach_count=gte:1` (reached at least once) — on both `/contacts` and `/companies`. It is derived from the activity log on read (never persisted), so it can never drift from the activities it summarises, and the displayed figure and the filtered figure share one source of truth. The agent manual now spells out the convention this enables: record outreach as an activity (not a tag), keep funnel position in `stage`, and reserve tags for durable labels.
+
 ## [0.7.0] - 2026-06-22
 
 ### Features

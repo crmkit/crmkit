@@ -278,12 +278,48 @@ func (s *Server) respondList(w http.ResponseWriter, r *http.Request, items any, 
 
 // ---- per-entity whitelists -----------------------------------------------
 
+// Outreach filters are derived from the activity log, not from a stored column: a
+// contact/company "has been contacted" when it carries an activity of an outreach
+// kind (call/email/meeting; note/task don't count). These correlated subqueries
+// stand in for a filter column - they are code-controlled (no user input), so
+// interpolating them into the WHERE clause is injection-safe, the same contract a
+// bare column identifier relies on (see store.QFilter.Column). The compared value
+// (a date for last_outreach, a count for outreach_count) is still a bound "?"
+// parameter. The outer row is referenced unaliased (contacts/companies), matching
+// the FROM clause buildListSQL/countMatching emit. MAX() over no rows is NULL, so
+// last_outreach=is:null is exactly "never contacted". The outreach kind list is
+// store.OutreachKindsSQL - the same one the activity-stats display uses, so the
+// filtered figure and the shown figure can never diverge.
+const (
+	contactLastOutreachExpr  = `(SELECT MAX(a.created_at) FROM activities a WHERE a.workspace_id = contacts.workspace_id AND a.contact_id = contacts.id AND a.kind IN (` + store.OutreachKindsSQL + `))`
+	contactOutreachCountExpr = `(SELECT COUNT(*) FROM activities a WHERE a.workspace_id = contacts.workspace_id AND a.contact_id = contacts.id AND a.kind IN (` + store.OutreachKindsSQL + `))`
+	companyLastOutreachExpr  = `(SELECT MAX(a.created_at) FROM activities a WHERE a.workspace_id = companies.workspace_id AND a.company_id = companies.id AND a.kind IN (` + store.OutreachKindsSQL + `))`
+	companyOutreachCountExpr = `(SELECT COUNT(*) FROM activities a WHERE a.workspace_id = companies.workspace_id AND a.company_id = companies.id AND a.kind IN (` + store.OutreachKindsSQL + `))`
+)
+
+// derivedExprs is the closed set of vetted, code-controlled SQL expressions
+// allowed to stand in for a filter column. They carry metacharacters (subquery
+// syntax) by design but contain no user input, so the safety invariant still
+// holds: parseListQuery only ever copies a colSpec.column from a whitelist into a
+// filter, so a user can pick one of these but never construct one. Anything that
+// is neither a plain identifier nor a member here is a bug - the query-safety test
+// enforces exactly that. Add a new derived filter column here when you define one.
+var derivedExprs = map[string]bool{
+	contactLastOutreachExpr:  true,
+	contactOutreachCountExpr: true,
+	companyLastOutreachExpr:  true,
+	companyOutreachCountExpr: true,
+}
+
 var contactQuery = queryConfig{
 	filter: map[string]colSpec{
 		"name": {"name", colText}, "email": {"email", colText}, "phone": {"phone", colText},
 		"company_id": {"company_id", colText}, "owner": {"owner", colText}, "stage": {"stage", colText},
 		"created_by": {"created_by", colText},
 		"created_at": {"created_at", colTime}, "updated_at": {"updated_at", colTime},
+		// Derived from the activity log (see outreach exprs above): segment by who
+		// you have / haven't reached without a tag.
+		"last_outreach": {contactLastOutreachExpr, colTime}, "outreach_count": {contactOutreachCountExpr, colInt},
 	},
 	sortBy: map[string]colSpec{
 		"created_at": {"created_at", colTime}, "updated_at": {"updated_at", colTime}, "name": {"name", colText},
@@ -299,6 +335,7 @@ var companyQuery = queryConfig{
 		"name": {"name", colText}, "domain": {"domain", colText},
 		"created_by": {"created_by", colText},
 		"created_at": {"created_at", colTime}, "updated_at": {"updated_at", colTime},
+		"last_outreach": {companyLastOutreachExpr, colTime}, "outreach_count": {companyOutreachCountExpr, colInt},
 	},
 	sortBy: map[string]colSpec{
 		"created_at": {"created_at", colTime}, "updated_at": {"updated_at", colTime}, "name": {"name", colText},
