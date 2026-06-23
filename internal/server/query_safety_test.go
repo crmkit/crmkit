@@ -44,6 +44,10 @@ func TestQueryIdentifiersAndOpsAreSafe(t *testing.T) {
 				t.Errorf("%s: search column %q is not a plain identifier", name, col)
 			}
 		}
+		// A configured on_behalf_of (EXISTS) predicate must be a vetted expression.
+		if cfg.behalfExpr != "" && !behalfExprs[cfg.behalfExpr] {
+			t.Errorf("%s: behalfExpr is not a vetted expression: %q", name, cfg.behalfExpr)
+		}
 	}
 
 	// Operators are interpolated into "<col> <op> ?", so they must be from a known
@@ -92,6 +96,14 @@ func FuzzParseListQuery(f *testing.F) {
 			return // rejected input is the safe outcome
 		}
 		for _, flt := range q.Filters {
+			// An Expr filter must be one of the vetted predicates (its single value is
+			// bound; the expression itself never carries user input).
+			if flt.Expr != "" {
+				if !behalfExprs[flt.Expr] {
+					t.Fatalf("parse produced unvetted Expr filter %q from %q=%q", flt.Expr, field, value)
+				}
+				continue
+			}
 			if !safeColumn(flt.Column) {
 				t.Fatalf("parse produced unsafe filter column %q from %q=%q", flt.Column, field, value)
 			}

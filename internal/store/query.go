@@ -27,6 +27,11 @@ type QFilter struct {
 	// the comparison applies to the extracted text. Op is "=" or "LIKE". The key
 	// is bound as a parameter, so it is injection-safe.
 	JSONKey string
+	// Expr, when set, is a complete predicate carrying exactly one "?" bound to
+	// Value (Column/Op are ignored) - used for derived membership filters such as an
+	// EXISTS over a related table. The expression is caller-whitelisted and never
+	// contains user input; only Value is bound, so it stays injection-safe.
+	Expr string
 }
 
 // Query is a validated list query: filters AND-ed together, an optional fuzzy
@@ -92,6 +97,14 @@ func (s *sqlStore) buildWhere(ws string, q Query) (string, []any) {
 	sb.WriteString(" WHERE workspace_id = ?")
 
 	for _, f := range q.Filters {
+		// An Expr filter is a whitelisted predicate with its own single bound value
+		// (e.g. an EXISTS over a related table). The expression carries no user input;
+		// only Value is bound.
+		if f.Expr != "" {
+			sb.WriteString(" AND " + f.Expr)
+			args = append(args, f.Value)
+			continue
+		}
 		// A JSON-key filter compares a key inside the JSON column as text. The key
 		// is bound (injection-safe); Op is "=" or "LIKE".
 		if f.JSONKey != "" {

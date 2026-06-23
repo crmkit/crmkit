@@ -136,6 +136,8 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /deals/{id}", s.authed(s.handleGetDeal))
 	mux.HandleFunc("PATCH /deals/{id}", s.authed(s.handleUpdateDeal))
 	mux.HandleFunc("DELETE /deals/{id}", s.authed(s.handleDeleteDeal))
+	mux.HandleFunc("GET /deals/{id}/activities", s.authed(s.handleListDealActivities))
+	mux.HandleFunc("POST /deals/{id}/activities", s.authed(s.handleCreateDealActivity))
 
 	mux.HandleFunc("GET /tickets", s.authed(s.handleListTickets))
 	mux.HandleFunc("POST /tickets", s.authed(s.handleCreateTicket))

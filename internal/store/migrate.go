@@ -294,6 +294,15 @@ FROM tickets WHERE follow_up_at IS NOT NULL`,
 		`ALTER TABLE tickets DROP COLUMN follow_up_at`,
 		`ALTER TABLE tickets DROP COLUMN follow_up_note`,
 	}},
+	// v19 (2026-06-23): activities can record the principal an agent acted on behalf
+	// of. on_behalf_of is an email by convention (like owner/assignee) - client-
+	// supplied and distinct from created_by, which stays the actor that actually
+	// wrote the row (the agent's token). Indexed so "everything done for someone"
+	// filters cheaply. Nullable, so existing activities are unaffected.
+	{Version: 19, Name: "activity on_behalf_of", Statements: []string{
+		`ALTER TABLE activities ADD COLUMN on_behalf_of TEXT`,
+		`CREATE INDEX IF NOT EXISTS idx_activities_behalf ON activities(workspace_id, on_behalf_of)`,
+	}},
 }
 
 // MigrationState reports how the database's schema compares to the code.

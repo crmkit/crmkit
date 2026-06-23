@@ -37,6 +37,10 @@ type queryConfig struct {
 	defSort string
 	tags    bool // entity has a tags column -> support ?tags= membership filtering
 	custom  bool // entity has a custom JSON column -> support ?custom.<key>= filtering
+	// behalfExpr, when set, is an EXISTS predicate (one bound "?") that matches
+	// records having an activity done on behalf of the given principal - the derived
+	// ?on_behalf_of= filter. Empty for entities with no activity log (tasks/campaigns).
+	behalfExpr string
 }
 
 var reservedParams = map[string]bool{
@@ -132,6 +136,20 @@ func parseListQuery(r *http.Request, cfg queryConfig) (store.Query, error) {
 				return q, &queryError{"invalid_filter", "custom field key must be letters, digits, or underscore, e.g. custom.region."}
 			}
 			q.Filters = append(q.Filters, buildCustomFilter(key, vals[0]))
+			continue
+		}
+		// on_behalf_of is DERIVED from the record's activities, not a column: it
+		// matches records that have an activity done on behalf of the principal.
+		// Only entities with an activity log support it (cfg.behalfExpr set).
+		if field == "on_behalf_of" {
+			if cfg.behalfExpr == "" {
+				return q, &queryError{"invalid_filter", "on_behalf_of is not filterable on this resource"}
+			}
+			val := strings.TrimSpace(vals[0])
+			if val == "" {
+				return q, &queryError{"invalid_value", "on_behalf_of needs a value, e.g. ?on_behalf_of=alice@acme.com"}
+			}
+			q.Filters = append(q.Filters, store.QFilter{Expr: cfg.behalfExpr, Value: val})
 			continue
 		}
 		spec, ok := cfg.filter[field]
@@ -311,6 +329,27 @@ var derivedExprs = map[string]bool{
 	companyOutreachCountExpr: true,
 }
 
+// behalf exprs are the ?on_behalf_of= derived filter: a record matches when it has
+// an activity done on behalf of the given principal (case-insensitive). The single
+// "?" is bound to the principal; the rest is code-controlled, so it is injection-
+// safe. Defined per entity because the correlated subquery references the outer
+// table unaliased (matching the FROM in buildListSQL/countMatching).
+const (
+	contactBehalfExpr = `EXISTS (SELECT 1 FROM activities a WHERE a.workspace_id = contacts.workspace_id AND a.contact_id = contacts.id AND lower(a.on_behalf_of) = lower(?))`
+	companyBehalfExpr = `EXISTS (SELECT 1 FROM activities a WHERE a.workspace_id = companies.workspace_id AND a.company_id = companies.id AND lower(a.on_behalf_of) = lower(?))`
+	dealBehalfExpr    = `EXISTS (SELECT 1 FROM activities a WHERE a.workspace_id = deals.workspace_id AND a.deal_id = deals.id AND lower(a.on_behalf_of) = lower(?))`
+	ticketBehalfExpr  = `EXISTS (SELECT 1 FROM activities a WHERE a.workspace_id = tickets.workspace_id AND a.ticket_id = tickets.id AND lower(a.on_behalf_of) = lower(?))`
+)
+
+// behalfExprs is the closed set of vetted on_behalf_of EXISTS predicates, asserted
+// by the query-safety test (mirrors derivedExprs for the outreach column exprs).
+var behalfExprs = map[string]bool{
+	contactBehalfExpr: true,
+	companyBehalfExpr: true,
+	dealBehalfExpr:    true,
+	ticketBehalfExpr:  true,
+}
+
 var contactQuery = queryConfig{
 	filter: map[string]colSpec{
 		"name": {"name", colText}, "email": {"email", colText}, "phone": {"phone", colText},
@@ -324,10 +363,11 @@ var contactQuery = queryConfig{
 	sortBy: map[string]colSpec{
 		"created_at": {"created_at", colTime}, "updated_at": {"updated_at", colTime}, "name": {"name", colText},
 	},
-	search:  []string{"name", "email", "phone", "company_id", "stage"},
-	defSort: "updated_at",
-	tags:    true,
-	custom:  true,
+	search:     []string{"name", "email", "phone", "company_id", "stage"},
+	defSort:    "updated_at",
+	tags:       true,
+	custom:     true,
+	behalfExpr: contactBehalfExpr,
 }
 
 var companyQuery = queryConfig{
@@ -340,10 +380,11 @@ var companyQuery = queryConfig{
 	sortBy: map[string]colSpec{
 		"created_at": {"created_at", colTime}, "updated_at": {"updated_at", colTime}, "name": {"name", colText},
 	},
-	search:  []string{"name", "domain", "notes"},
-	defSort: "updated_at",
-	tags:    true,
-	custom:  true,
+	search:     []string{"name", "domain", "notes"},
+	defSort:    "updated_at",
+	tags:       true,
+	custom:     true,
+	behalfExpr: companyBehalfExpr,
 }
 
 var dealQuery = queryConfig{
@@ -357,9 +398,10 @@ var dealQuery = queryConfig{
 		"created_at": {"created_at", colTime}, "updated_at": {"updated_at", colTime},
 		"amount_cents": {"amount_cents", colInt}, "title": {"title", colText},
 	},
-	search:  []string{"title"},
-	defSort: "updated_at",
-	custom:  true,
+	search:     []string{"title"},
+	defSort:    "updated_at",
+	custom:     true,
+	behalfExpr: dealBehalfExpr,
 }
 
 var ticketQuery = queryConfig{
@@ -372,10 +414,11 @@ var ticketQuery = queryConfig{
 	sortBy: map[string]colSpec{
 		"created_at": {"created_at", colTime}, "updated_at": {"updated_at", colTime}, "subject": {"subject", colText},
 	},
-	search:  []string{"subject", "content"},
-	defSort: "updated_at",
-	tags:    true,
-	custom:  true,
+	search:     []string{"subject", "content"},
+	defSort:    "updated_at",
+	tags:       true,
+	custom:     true,
+	behalfExpr: ticketBehalfExpr,
 }
 
 var taskQuery = queryConfig{

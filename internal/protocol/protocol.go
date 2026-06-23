@@ -197,6 +197,11 @@ type Contact struct {
 	// CreatedBy is the member (human or agent) who created this record, stamped
 	// once at creation. Persisted; never changes.
 	CreatedBy string `json:"created_by,omitempty"`
+	// OnBehalfOf is the set of principals work has been done for, DERIVED from this
+	// record's activities (the distinct activity.on_behalf_of values, an agent can act
+	// for several people). Populated on reads for display (never persisted); filter a
+	// list with ?on_behalf_of=<email>. See Activity.OnBehalfOf for the per-action axis.
+	OnBehalfOf []string `json:"on_behalf_of,omitempty"`
 	// ActivityCount / LastActivityAt summarise the contact's activity log. They
 	// are populated on a single-record fetch for display (never persisted), so an
 	// agent sees there's history worth pulling without a blind second call.
@@ -224,6 +229,9 @@ type Company struct {
 	UpdatedAt time.Time      `json:"updated_at"`
 	// CreatedBy is the member (human or agent) who created this record.
 	CreatedBy string `json:"created_by,omitempty"`
+	// OnBehalfOf is the set of principals work has been done for, derived from this
+	// company's activities (never persisted); filter with ?on_behalf_of=<email>.
+	OnBehalfOf []string `json:"on_behalf_of,omitempty"`
 	// ActivityCount / LastActivityAt summarise the company's activity log,
 	// populated on a single-record fetch for display (never persisted).
 	ActivityCount  int        `json:"activity_count,omitempty"`
@@ -260,6 +268,9 @@ type Deal struct {
 	// CreatedBy is the member (human or agent) who created this record, stamped
 	// once at creation. Persisted; never changes.
 	CreatedBy string `json:"created_by,omitempty"`
+	// OnBehalfOf is the set of principals work has been done for, derived from this
+	// deal's activities (never persisted); filter with ?on_behalf_of=<email>.
+	OnBehalfOf []string `json:"on_behalf_of,omitempty"`
 	// ActivityCount / LastActivityAt summarise the deal's activity log, populated
 	// on a single-record fetch for display (never persisted).
 	ActivityCount  int        `json:"activity_count,omitempty"`
@@ -292,6 +303,9 @@ type Ticket struct {
 	UpdatedAt time.Time      `json:"updated_at"`
 	// CreatedBy is the member who opened the ticket, stamped once. Persisted.
 	CreatedBy string `json:"created_by,omitempty"`
+	// OnBehalfOf is the set of principals work has been done for, derived from this
+	// ticket's activities (never persisted); filter with ?on_behalf_of=<email>.
+	OnBehalfOf []string `json:"on_behalf_of,omitempty"`
 	// ActivityCount / LastActivityAt summarise the ticket's conversation,
 	// populated on a single-record fetch for display (never persisted).
 	ActivityCount  int        `json:"activity_count,omitempty"`
@@ -402,10 +416,17 @@ type Activity struct {
 	DealHandle    string    `json:"deal_handle,omitempty"`
 	CompanyHandle string    `json:"company_handle,omitempty"`
 	TicketHandle  string    `json:"ticket_handle,omitempty"`
-	Kind          string    `json:"kind"` // note | call | email | meeting | task
-	Body          string    `json:"body"`
-	CreatedBy     string    `json:"created_by,omitempty"`
-	CreatedAt     time.Time `json:"created_at"`
+	Kind string `json:"kind"` // note | call | email | meeting | task
+	Body string `json:"body"`
+	// OnBehalfOf is the principal this interaction was performed for - the person an
+	// agent acted on behalf of. An email by convention (like owner/assignee), and
+	// client-supplied, so it can name someone without a crmkit account. It is a
+	// separate axis from CreatedBy: CreatedBy is the actor that wrote the row (the
+	// agent's token, server-stamped), OnBehalfOf is who it was done for. Empty when
+	// the writer acted as itself.
+	OnBehalfOf string    `json:"on_behalf_of,omitempty"`
+	CreatedBy  string    `json:"created_by,omitempty"`
+	CreatedAt  time.Time `json:"created_at"`
 }
 
 // ---- timezone-aware display -------------------------------------------------
