@@ -2,6 +2,12 @@
 
 All notable changes to crmkit, following [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
+## [0.9.1] - 2026-07-02
+
+### Changed
+
+- MCP `tools/list` now annotates the generic `request` tool with a `title` and the full standard hint set — `readOnlyHint`, `destructiveHint`, and `openWorldHint` — all present and explicit. A single tool spans every HTTP method, so it is annotated for its worst case: not read-only and destructive (it can `PATCH`/`DELETE`); `openWorldHint` is `false` because crmkit only ever touches the caller's own workspace, never public/internet state. This satisfies app-directory scanners (e.g. the OpenAI apps store) that require every tool to set all three hints. Purpose-split, per-method-annotated connectors remain the recommended surface for directory submissions.
+
 ## [0.9.0] - 2026-06-23
 
 ### Features

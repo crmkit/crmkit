@@ -246,6 +246,12 @@ func TestOAuthToMCPEndToEnd(t *testing.T) {
 	if status != 200 || !strings.Contains(body, `"request"`) || !strings.Contains(body, "/help") {
 		t.Fatalf("tools/list: %d %q", status, body)
 	}
+	// The OpenAI apps directory requires all three tool annotation hints present.
+	for _, hint := range []string{"readOnlyHint", "destructiveHint", "openWorldHint"} {
+		if !strings.Contains(body, hint) {
+			t.Fatalf("tools/list missing %s annotation: %q", hint, body)
+		}
+	}
 
 	// 8) request POST /contacts returns the plain-text record verbatim.
 	call := `{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"request","arguments":{"method":"POST","path":"/contacts","body":{"name":"Jane Doe","email":"jane@acme.com","stage":"lead"}}}}`
