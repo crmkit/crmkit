@@ -19,7 +19,13 @@ import (
 // mcpTool is one entry in the MCP tool catalogue.
 type mcpTool struct {
 	Name        string
+	Title       string
 	Description string
+	// ReadOnly / Destructive back the MCP tool annotations of the same name.
+	// The generic request tool can issue any method, so it is annotated for its
+	// worst case: not read-only, and destructive (it can DELETE/PATCH).
+	ReadOnly    bool
+	Destructive bool
 	InputSchema map[string]any
 	// build maps tool arguments to an internal HTTP request. A returned error is
 	// surfaced to the model as a tool error (isError), not a protocol fault.
@@ -83,7 +89,15 @@ Fetch the full manual any time: request GET /help`
 var toolCatalogue = []mcpTool{
 	{
 		Name:        "request",
+		Title:       "Call the crmkit API",
 		Description: requestDescription,
+		// One generic tool spans every method, so it cannot be read-only and must
+		// be treated as destructive (it can DELETE/PATCH). openWorldHint is always
+		// false (crmkit is a private CRM). Directories that require a single
+		// safe/unsafe split per tool should use the purpose-built connectors
+		// instead (see the api deployment's /openai/mcp and /anthropic/mcp).
+		ReadOnly:    false,
+		Destructive: true,
 		InputSchema: map[string]any{
 			"type":                 "object",
 			"additionalProperties": false,
@@ -117,14 +131,25 @@ var toolIndex = func() map[string]mcpTool {
 	return m
 }()
 
-// mcpTools returns the tools/list payload: name, description, inputSchema.
+// mcpTools returns the tools/list payload: name, title, description, inputSchema
+// and annotations. Every tool sets all three annotation hints explicitly (true
+// or false) - directories such as the OpenAI apps store require them present,
+// not just when true. openWorldHint is always false: crmkit only ever touches
+// the caller's own workspace, never public/internet state.
 func mcpTools() []map[string]any {
 	out := make([]map[string]any, 0, len(toolCatalogue))
 	for _, t := range toolCatalogue {
 		out = append(out, map[string]any{
 			"name":        t.Name,
+			"title":       t.Title,
 			"description": t.Description,
 			"inputSchema": t.InputSchema,
+			"annotations": map[string]any{
+				"title":           t.Title,
+				"readOnlyHint":    t.ReadOnly,
+				"destructiveHint": t.Destructive,
+				"openWorldHint":   false,
+			},
 		})
 	}
 	return out
