@@ -29,9 +29,9 @@ so a global cap (e.g. "20 req/s per IP") is no longer enforced - a client can
 round-robin across instances. That is the trigger to switch to a shared backend
 (Redis), and the only reason to introduce Redis at all for crmkit today.
 
-## Adding the Redis backend
+## Adding another backend
 
-Implement a `redisProvider` satisfying `Provider`:
+Implement a provider satisfying `Provider`:
 
 ```go
 type Provider interface {
@@ -42,8 +42,10 @@ type Limiter interface { Allow(key string) bool }
 ```
 
 - `Limiter(name, rate, burst)` returns a limiter whose keys are namespaced by
-  `name` (e.g. `name + ":" + key`), implementing a token bucket or sliding
-  window in Redis (a small Lua script, or a library like `go-redis/redis_rate`).
-- Wire it into `Open`'s `case BackendRedis`.
+  `name` (for example, `name + ":" + key`).
+- Add a backend constant and wire the provider into `Open`.
+- Add configuration validation and an integration test covering shared limits,
+  failures, and cleanup.
 
-Nothing in the server changes - it already talks to the interfaces.
+The Redis implementation is the reference for a shared backend. Nothing in the
+server changes because it already talks to the interfaces.

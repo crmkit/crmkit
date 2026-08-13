@@ -98,7 +98,8 @@ them to operate crmkit.
 - Money is integer cents (amount_cents) plus a currency code.
 - Times in reads are compact RFC3339 with the workspace's offset, e.g.
   2026-06-10T09:00-07:00 (or ...Z for UTC). Instants are stored in UTC; the
-  workspace timezone (default UTC) only controls formatting. Set it with
+  workspace timezone (default UTC) only controls formatting. GET /whoami
+  reports the current zone (workspace_timezone); set it with
   PATCH /workspaces/{id} {"timezone":"America/Los_Angeles"} (an IANA name). When
   you write a time (a task's due_at), include the offset so it lands on the
   instant the user means.
@@ -231,7 +232,7 @@ when a type is truncated the response says so - switch to that type's endpoint
 GET /help this manual
 GET /healthz liveness probe (no auth)
 GET /readyz readiness probe - checks the database (no auth)
-GET /whoami identity + current workspace behind the token
+GET /whoami identity + current workspace (name, plan, and display timezone) behind the token
 GET /search?q=&types= find anything across contacts, companies, deals & tickets (grouped; see SEARCH)
 GET /tokens list your active tokens (sessions)
 DELETE /tokens/{id} revoke one of your tokens (log out a session)

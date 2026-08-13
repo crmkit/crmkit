@@ -238,9 +238,11 @@ func TestFullContactFlowPlainText(t *testing.T) {
 	ts := newTestServer(t)
 	token := authenticate(t, ts)
 
-	// whoami works with the token and surfaces the workspace name.
+	// whoami works with the token and surfaces the workspace name and the
+	// display timezone (default UTC) so the agent knows the offset to write in.
 	if status, body := do(t, ts, "GET", "/whoami", token, ""); status != 200 ||
-		!strings.Contains(body, "me@example.com") || !strings.Contains(body, "workspace_name:") {
+		!strings.Contains(body, "me@example.com") || !strings.Contains(body, "workspace_name:") ||
+		!strings.Contains(body, "timezone:") || !strings.Contains(body, "UTC") {
 		t.Fatalf("whoami failed: %d %q", status, body)
 	}
 

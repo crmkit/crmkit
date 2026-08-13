@@ -77,8 +77,9 @@ use case above, made real.
   do next - it self-corrects without a schema to lean on.
 - **OTP auth, bearer tokens.** First login emails a 6-digit code; verifying it
   mints a long-lived token sent as `Authorization: Bearer <token>`.
-- **Single static binary.** Pure-Go SQLite (`modernc.org/sqlite`), so
-  `CGO_ENABLED=0` builds a static binary that deploys as one file.
+- **Single static binary.** Both embedded SQLite (`modernc.org/sqlite`) and
+  Postgres are pure Go, so `CGO_ENABLED=0` builds a static binary that deploys
+  as one file.
 
 ## Quick start
 
@@ -243,6 +244,10 @@ make build    # static binaries
 Releasing (version bump → tagged multi-platform build) is documented in
 [RELEASES.md](RELEASES.md).
 
-## Related
+## Ecosystem
 
-- [zot](https://github.com/openzot/openzot) - an autonomous coding agent you don't babysit.
+| Project                                       | Role                                                           |
+| --------------------------------------------- | -------------------------------------------------------------- |
+| [zot](https://github.com/openzot/openzot)     | Run complete coding tasks autonomously from a single brief     |
+| [Pantalk](https://github.com/pantalk/pantalk) | Connect coding agents to the chat platforms people already use |
+| [MCPShim](https://github.com/mcpshim/mcpshim) | Turn MCP servers and HTTP APIs into standard CLI commands      |

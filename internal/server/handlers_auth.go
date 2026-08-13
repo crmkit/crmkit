@@ -193,18 +193,24 @@ func (s *Server) handleWhoami(w http.ResponseWriter, r *http.Request) {
 		s.serverErr(w, r)
 		return
 	}
+	// The display timezone reads are formatted in; locationOf normalizes an
+	// unset or unrecognised zone to UTC, so this is always a valid IANA name
+	// the agent can reuse when it writes a time (e.g. a task's due_at).
+	tz := locationOf(sess).String()
 	resp := map[string]any{
-		"email":          sess.Email,
-		"workspace_id":   sess.WorkspaceID,
-		"workspace_name": wsName,
-		"token_name":     sess.TokenName,
-		"plan":           plan,
-		"usage":          usage,
+		"email":              sess.Email,
+		"workspace_id":       sess.WorkspaceID,
+		"workspace_name":     wsName,
+		"workspace_timezone": tz,
+		"token_name":         sess.TokenName,
+		"plan":               plan,
+		"usage":              usage,
 	}
 	fields := []render.Field{
 		render.F("email", sess.Email),
 		render.F("workspace", sess.WorkspaceID),
 		render.F("workspace_name", wsName),
+		render.F("timezone", tz),
 		render.F("token", sess.TokenName),
 		render.F("plan", plan),
 	}
